@@ -358,6 +358,48 @@ struct SupportResource: Equatable, Identifiable {
     let detail: String
 }
 
+struct TeacherPostgameReflection: Equatable {
+    let monologue: String
+    let segments: [TeacherMonologueSegment]
+    let analysis: [TeacherAnalysisPoint]
+    let studentTakeaway: String
+    let metrics: [EndingMetric]
+}
+
+struct TeacherMonologueSegment: Equatable, Identifiable {
+    let id = UUID()
+    let time: String
+    let title: String
+    let text: String
+}
+
+struct TeacherAnalysisPoint: Equatable, Identifiable {
+    let id = UUID()
+    let title: String
+    let detail: String
+    let icon: String
+}
+
+struct MechanicExplanation: Equatable, Identifiable {
+    let id = UUID()
+    let title: String
+    let formula: String
+    let note: String
+}
+
+struct ReviewPoint: Equatable, Identifiable {
+    let id = UUID()
+    let title: String
+    let detail: String
+    let icon: String
+}
+
+struct PerformanceReview: Equatable {
+    let strengths: [ReviewPoint]
+    let improvements: [ReviewPoint]
+    let encouragement: String
+}
+
 struct Classmate: Identifiable {
     let id: Int
     let name: String
