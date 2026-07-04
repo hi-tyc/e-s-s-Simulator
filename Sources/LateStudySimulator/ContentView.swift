@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var game: GameManager
+    @State private var isPerceptionPanelPresented = false
 
     var body: some View {
         ZStack {
@@ -31,6 +32,10 @@ struct ContentView: View {
 
             if case .ending(let ending) = game.gameState {
                 endingOverlay(ending)
+            }
+
+            if isPerceptionPanelPresented {
+                perceptionPanel
             }
         }
         .foregroundStyle(.white)
@@ -305,6 +310,14 @@ struct ContentView: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white.opacity(0.76))
                 Spacer()
+                Button {
+                    isPerceptionPanelPresented.toggle()
+                } label: {
+                    Image(systemName: isPerceptionPanelPresented ? "rectangle.compress.vertical" : "rectangle.expand.vertical")
+                        .frame(width: 24, height: 22)
+                }
+                .buttonStyle(SegmentButtonStyle(isSelected: isPerceptionPanelPresented))
+                .help(isPerceptionPanelPresented ? "关闭声场详情" : "打开声场详情")
                 soundRadar
                     .frame(width: 46, height: 46)
             }
@@ -329,7 +342,135 @@ struct ContentView: View {
             }
         }
         .padding(8)
-        .frame(width: 160, alignment: .leading)
+        .frame(width: 180, alignment: .leading)
+        .liquidGlassPanel()
+    }
+
+    private var perceptionPanel: some View {
+        ZStack {
+            Rectangle()
+                .fill(.black.opacity(0.34))
+                .ignoresSafeArea()
+                .onTapGesture {
+                    isPerceptionPanelPresented = false
+                }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "waveform.and.magnifyingglass")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.cyan)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("声场与视线")
+                            .font(.system(size: 20, weight: .bold))
+                        Text("第 \(game.currentTurn) 回合 · 第三排中间 · \(game.cameraPose.visionZone.rawValue) \(game.cameraPose.visionZone.displayName)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.66))
+                    }
+                    Spacer()
+                    Button {
+                        isPerceptionPanelPresented = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .frame(width: 28, height: 26)
+                    }
+                    .buttonStyle(SegmentButtonStyle(isSelected: false))
+                    .keyboardShortcut(.cancelAction)
+                }
+
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(spacing: 8) {
+                        soundRadar
+                            .frame(width: 116, height: 116)
+                            .padding(8)
+                            .liquidGlassPanel()
+                        Text("强度越高，圆点越靠外、越亮。")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.58))
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(width: 140)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("视觉线索")
+                            .font(.system(size: 13, weight: .bold))
+                        perceptionRow(
+                            icon: "eye.fill",
+                            title: "\(game.cameraPose.rawValue) · \(game.cameraPose.visionZone.displayName)",
+                            detail: "视觉注意力 \(Int(game.player.visualAttention))，姿态 \(game.player.posture.rawValue)。",
+                            advice: visualAdvice,
+                            tint: .mint
+                        )
+                        perceptionRow(
+                            icon: game.teacher.isNearPlayer ? "person.crop.circle.badge.exclamationmark.fill" : "person.crop.circle.fill",
+                            title: game.teacher.isNearPlayer ? "老师在近处" : "老师在远处或不确定位置",
+                            detail: "教师 KPI \(Int(game.teacher.kpiPressure))，疲惫 \(Int(game.teacher.fatigue))，制度压力 \(Int(game.teacher.institutionalPressure))。",
+                            advice: teacherDistanceAdvice,
+                            tint: game.teacher.isNearPlayer ? .orange : .cyan
+                        )
+                        perceptionRow(
+                            icon: "rectangle.lefthalf.inset.filled",
+                            title: "余光强度 左 \(Int(game.peripheralLeft * 100)) · 右 \(Int(game.peripheralRight * 100))",
+                            detail: "余光越高，越可能代表同桌、过道、老师或后门的不确定信号。",
+                            advice: peripheralAdvice,
+                            tint: .purple
+                        )
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("当前声音")
+                        .font(.system(size: 13, weight: .bold))
+                    if game.audioCues.isEmpty {
+                        perceptionRow(
+                            icon: "speaker.slash.fill",
+                            title: "暂无突出声源",
+                            detail: "教室只剩环境底噪，暂时没有需要立即处理的声音事件。",
+                            advice: "保持低暴露动作，优先恢复注意力或推进作业。",
+                            tint: .white
+                        )
+                    } else {
+                        ForEach(game.audioCues.prefix(5)) { cue in
+                            perceptionRow(
+                                icon: icon(for: cue.kind),
+                                title: "\(cue.kind.rawValue) · \(cue.direction) · 强度 \(Int(cue.intensity * 100))",
+                                detail: cue.note,
+                                advice: audioAdvice(for: cue),
+                                tint: color(for: cue.kind)
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(18)
+            .frame(width: 720, alignment: .leading)
+            .liquidGlassPanel()
+        }
+        .transition(.opacity)
+    }
+
+    private func perceptionRow(icon: String, title: String, detail: String, advice: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(tint.opacity(0.9))
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.66))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(advice)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint.opacity(0.88))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .liquidGlassPanel()
     }
 
@@ -361,6 +502,68 @@ struct ContentView: View {
         }
         .accessibilityLabel("声音方向雷达")
     }
+
+    private var visualAdvice: String {
+        switch game.cameraPose {
+        case .forward:
+            return "适合维持普通状态，风险较低；如果能量还够，可以继续写作业或观察老师节奏。"
+        case .desk:
+            return "桌面近景适合隐藏动作，但会切断中景信息；老师靠近时不要连续停留太久。"
+        case .board:
+            return "抬头看起来认真，但会消耗注意力；高压时可以短暂停留后切回前方。"
+        case .left, .right:
+            return "余光能确认同桌或过道信息，但转头本身会增加暴露；用完线索后及时收回视线。"
+        }
+    }
+
+    private var teacherDistanceAdvice: String {
+        if game.teacher.isNearPlayer {
+            return "先停止手机、零食、传纸条等高暴露动作，选择前方、写作业或呼吸更稳。"
+        }
+        if game.teacher.positionIndex == 8 {
+            return "后门观察缺少脚步声，别只依赖听觉；余光和后方声音都要一起判断。"
+        }
+        return "老师暂时不近，但 KPI 和巡视频率会让风险回升；可以趁低风险做恢复或低声连接。"
+    }
+
+    private var peripheralAdvice: String {
+        if game.peripheralLeft > 0.65 || game.peripheralRight > 0.65 {
+            return "余光信号偏强，说明旁边或过道有变化；优先确认风险来源，再决定是否行动。"
+        }
+        return "余光信号不强，当前更适合处理桌面任务或主动恢复注意力。"
+    }
+
+    private func audioAdvice(for cue: AudioCue) -> String {
+        switch cue.kind {
+        case .footstep:
+            return cue.intensity > 0.7 ? "脚步很近，立刻降低暴露，等位置确定后再行动。" : "脚步还在远处，可以先观察节奏，不要急着回头。"
+        case .phone:
+            return "手机声会快速推高暴露；如果想获得连接感，优先让同桌掩护或只看一眼后收起。"
+        case .paper:
+            return "纸张声通常意味着求助、纸条或作业推进；强度不高时适合低风险连接。"
+        case .whisper:
+            return game.settings.allowsWhispering ? "低声交流被制度允许，适合建立支持。" : "禁止交流时低语风险更高，尽量缩短交流时间。"
+        case .chair:
+            return "椅子声代表姿态变化或身体需求；先判断是不是老师靠近或同学崩溃。"
+        case .crying:
+            return "抽泣是高优先级信号。递纸巾、低声询问或告诉老师都比忽视更能降低风险。"
+        case .lights:
+            return "灯光或吊扇变化会短暂打乱秩序，可以用来休息眼睛，也可能暴露手机光。"
+        case .heartbeat:
+            return "心跳声变大说明身体进入报警。先呼吸或降低输入，不要连续做高消耗判断。"
+        case .broadcast:
+            return "广播会提高全班制度压力。坐直能降暴露，但也会增加面具成本。"
+        case .knock:
+            return "后门声音会制造不确定性。确认信息有代价，回头前先看当前暴露值。"
+        case .stomach:
+            return "饥饿会削弱注意力。若老师不近，可以考虑零食；否则等课间或先呼吸。"
+        case .wrapper:
+            return "包装纸声很容易被放大。老师近时先停止，远时也要尽快收尾。"
+        case .teacherCough, .teacherSigh:
+            return "老师的声音也是状态线索。疲惫和 KPI 高时，更容易把小动作误读成纪律问题。"
+        }
+    }
+
 
     private var messagePanel: some View {
         VStack(spacing: 8) {
@@ -719,6 +922,9 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 660)
 
+                performanceReviewPanel(game.performanceReview)
+                teacherReflectionPanel(game.teacherPostgameReflection)
+                mechanicPanel(game.mechanicExplanations)
                 endingAnalysis(ending)
                 nightTrajectoryPanel
                 comparisonPanel(ending.comparisons)
@@ -737,6 +943,204 @@ struct ContentView: View {
             .padding(32)
         }
         .frame(maxWidth: 760, maxHeight: 660)
+        .liquidGlassPanel()
+    }
+
+    private func performanceReviewPanel(_ review: PerformanceReview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist.checked")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.green)
+                Text("当晚表现复盘")
+                    .font(.system(size: 14, weight: .bold))
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(330), spacing: 8), count: 2), spacing: 8) {
+                reviewColumn(title: "做得好的地方", points: review.strengths, tint: .green)
+                reviewColumn(title: "下次可调整", points: review.improvements, tint: .orange)
+            }
+
+            Text(review.encouragement)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.cyan.opacity(0.9))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        }
+        .padding(12)
+        .frame(maxWidth: 700, alignment: .leading)
+        .liquidGlassPanel()
+    }
+
+    private func reviewColumn(title: String, points: [ReviewPoint], tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(tint.opacity(0.9))
+            ForEach(points.prefix(4)) { point in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: point.icon)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(tint.opacity(0.86))
+                        .frame(width: 14, height: 14)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(point.title)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(point.detail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.68))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: 330, alignment: .topLeading)
+        .frame(minHeight: 178, alignment: .topLeading)
+        .liquidGlassPanel()
+    }
+
+    private func teacherReflectionPanel(_ reflection: TeacherPostgameReflection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.text.rectangle.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.purple)
+                Text("教师视角：整晚复盘")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            Text("“\(reflection.monologue)”")
+                .font(.system(size: 12, weight: .medium, design: .serif))
+                .italic()
+                .foregroundStyle(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("整晚内心独白")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.purple.opacity(0.9))
+                ForEach(reflection.segments) { segment in
+                    HStack(alignment: .top, spacing: 9) {
+                        Text(segment.time)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.purple.opacity(0.88))
+                            .frame(width: 44, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(segment.title)
+                                .font(.system(size: 11, weight: .bold))
+                            Text(segment.text)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(9)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .liquidGlassPanel()
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("站在老师这边的分析")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.orange.opacity(0.92))
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(330), spacing: 8), count: 2), spacing: 8) {
+                    ForEach(reflection.analysis) { item in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: item.icon)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.orange.opacity(0.86))
+                                .frame(width: 14, height: 14)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.title)
+                                    .font(.system(size: 11, weight: .bold))
+                                Text(item.detail)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.68))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(10)
+                        .frame(width: 330, alignment: .topLeading)
+                        .frame(minHeight: 118, alignment: .topLeading)
+                        .liquidGlassPanel()
+                    }
+                }
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "hands.sparkles.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.cyan)
+                    .frame(width: 16, height: 16)
+                Text(reflection.studentTakeaway)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.cyan.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .liquidGlassPanel()
+
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(126), spacing: 8), count: 3), spacing: 8) {
+                ForEach(reflection.metrics) { item in
+                    compactMetricCard(item, tint: .purple)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 700, alignment: .leading)
+        .liquidGlassPanel()
+    }
+
+    private func mechanicPanel(_ explanations: [MechanicExplanation]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "function")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.cyan)
+                Text("焦虑与崩溃机制")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            ForEach(explanations) { item in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title)
+                        .font(.system(size: 11, weight: .bold))
+                    Text(item.formula)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.cyan.opacity(0.86))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(item.note)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .liquidGlassPanel()
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 700, alignment: .leading)
+        .liquidGlassPanel()
+    }
+
+    private func compactMetricCard(_ item: EndingMetric, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+            Text(item.value)
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundStyle(tint.opacity(0.92))
+            Text(item.note)
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.58))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(9)
+        .frame(width: 126, alignment: .topLeading)
+        .frame(minHeight: 82, alignment: .topLeading)
         .liquidGlassPanel()
     }
 

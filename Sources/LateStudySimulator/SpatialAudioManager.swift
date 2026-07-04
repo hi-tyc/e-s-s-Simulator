@@ -1,15 +1,17 @@
 import AppKit
+import AudioToolbox
 import AVFoundation
 import SceneKit
 
 final class SpatialAudioManager {
     private let engine = AVAudioEngine()
-    private let environment = AVAudioEnvironmentNode()
+    private let environment = SpatialAudioManager.makeEnvironmentNodeIfAvailable()
     private var source: AVAudioSourceNode?
     private var ambientSource: AVAudioSourceNode?
     private var spatialCueSources: [AVAudioSourceNode] = []
     private var spatialCuePlayers: [AVAudioPlayerNode] = []
     private var loopPlayers: [String: AVAudioPlayerNode] = [:]
+    private var didConfigureEngine = false
     private var phase: Double = 0
     private var ambientPhase: Double = 0
     private var fanPhase: Double = 0
@@ -46,13 +48,31 @@ final class SpatialAudioManager {
     func start() {
         guard !engine.isRunning else { return }
 
-        engine.attach(environment)
-        engine.connect(environment, to: engine.mainMixerNode, format: nil)
-        environment.listenerPosition = AVAudio3DPoint(x: 0, y: 0.8, z: 1.5)
-        environment.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: 0, pitch: 0, roll: 0)
-        environment.reverbParameters.enable = true
-        environment.reverbParameters.loadFactoryReverbPreset(.mediumRoom)
-        environment.reverbParameters.level = -18
+        if !didConfigureEngine {
+            configureEngine()
+            didConfigureEngine = true
+        }
+        if loopPlayers.isEmpty {
+            startAmbientLoops()
+        }
+
+        do {
+            try engine.start()
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    private func configureEngine() {
+        if let environment {
+            engine.attach(environment)
+            engine.connect(environment, to: engine.mainMixerNode, format: nil)
+            environment.listenerPosition = AVAudio3DPoint(x: 0, y: 0.8, z: 1.5)
+            environment.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: 0, pitch: 0, roll: 0)
+            environment.reverbParameters.enable = true
+            environment.reverbParameters.loadFactoryReverbPreset(.mediumRoom)
+            environment.reverbParameters.level = -18
+        }
 
         let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
         let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
@@ -99,20 +119,13 @@ final class SpatialAudioManager {
         ambientSource = ambient
         engine.attach(ambient)
         engine.connect(ambient, to: engine.mainMixerNode, format: format)
-        startAmbientLoops()
-
-        do {
-            try engine.start()
-        } catch {
-            NSSound.beep()
-        }
     }
 
     func updateStress(energy: Double, stress: Double, teacherNear: Bool, support: Double, classroomNoise: Double) {
         let supportBuffer = support / 360
         let intensity = max(0, min(1, (100 - energy) / 100 + stress / 180 + classroomNoise * 0.22 + (teacherNear ? 0.18 : 0) - supportBuffer))
         targetAmplitude = Float(intensity * 0.08)
-        environment.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: teacherNear ? 25 : 0, pitch: 0, roll: 0)
+        environment?.listenerAngularOrientation = AVAudio3DAngularOrientation(yaw: teacherNear ? 25 : 0, pitch: 0, roll: 0)
     }
 
     func updateAmbient(classroomNoise: Double, period: StudyPeriod, lightLevel: Double, elapsedMinutes: Int) {
@@ -125,8 +138,8 @@ final class SpatialAudioManager {
     }
 
     func updateListener(position: SCNVector3, orientation: SCNVector3) {
-        environment.listenerPosition = AVAudio3DPoint(x: Float(position.x), y: Float(position.y), z: Float(position.z))
-        environment.listenerAngularOrientation = AVAudio3DAngularOrientation(
+        environment?.listenerPosition = AVAudio3DPoint(x: Float(position.x), y: Float(position.y), z: Float(position.z))
+        environment?.listenerAngularOrientation = AVAudio3DAngularOrientation(
             yaw: Float(orientation.y * 180 / .pi),
             pitch: Float(orientation.x * 180 / .pi),
             roll: Float(orientation.z * 180 / .pi)
@@ -181,7 +194,7 @@ final class SpatialAudioManager {
         }
         spatialCueSources.append(cue)
         engine.attach(cue)
-        engine.connect(cue, to: kind == .heartbeat ? engine.mainMixerNode : environment, format: format)
+        engine.connect(cue, to: outputNode(for: kind), format: format)
 
         if kind == .crying || kind == .lights {
             NSSound.beep()
@@ -194,8 +207,19 @@ final class SpatialAudioManager {
         targetAmbientNoise = 0
         targetFanAmount = 0
         targetOutsideAmount = 0
-        loopPlayers.values.forEach { $0.stop() }
+        loopPlayers.values.forEach {
+            $0.stop()
+            engine.detach($0)
+        }
         loopPlayers.removeAll()
+        spatialCueSources.forEach {
+            $0.reset()
+            engine.detach($0)
+        }
+        spatialCuePlayers.forEach {
+            $0.stop()
+            engine.detach($0)
+        }
         spatialCueSources.removeAll()
         spatialCuePlayers.removeAll()
     }
@@ -249,10 +273,31 @@ final class SpatialAudioManager {
 
         spatialCuePlayers.append(player)
         engine.attach(player)
-        engine.connect(player, to: kind == .heartbeat ? engine.mainMixerNode : environment, format: file.processingFormat)
+        engine.connect(player, to: outputNode(for: kind), format: file.processingFormat)
         player.scheduleFile(file, at: nil)
         player.play()
         return true
+    }
+
+    private func outputNode(for kind: AudioCueKind) -> AVAudioNode {
+        if kind == .heartbeat || environment == nil {
+            return engine.mainMixerNode
+        }
+        return environment!
+    }
+
+    private static func makeEnvironmentNodeIfAvailable() -> AVAudioEnvironmentNode? {
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Mixer,
+            componentSubType: kAudioUnitSubType_SpatialMixer,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        guard AudioComponentFindNext(nil, &description) != nil else {
+            return nil
+        }
+        return AVAudioEnvironmentNode()
     }
 
     private func audioAssetURL(for kind: AudioCueKind) -> URL? {
