@@ -29,6 +29,7 @@ final class GameManager: ObservableObject {
     @Published var hasTriggeredPhoneNotification: Bool = false
     @Published var hasTriggeredBroadcast: Bool = false
     @Published var hasTriggeredKnockOnDoor: Bool = false
+    @Published var hasTriggeredPlayerBreakdown: Bool = false
     @Published var hasTriggeredClassmateHelpRequest: Bool = false
     @Published var hasTriggeredClassmateReport: Bool = false
     @Published var hasTriggeredMemoryTrust: Bool = false
@@ -65,6 +66,7 @@ final class GameManager: ObservableObject {
         hasTriggeredPhoneNotification = false
         hasTriggeredBroadcast = false
         hasTriggeredKnockOnDoor = false
+        hasTriggeredPlayerBreakdown = false
         hasTriggeredClassmateHelpRequest = false
         hasTriggeredClassmateReport = false
         hasTriggeredMemoryTrust = false
@@ -516,7 +518,8 @@ final class GameManager: ObservableObject {
             )
             addAudioCue(.whisper, direction: "前方近处", intensity: 0.5, note: "老师的低声关心没有穿透全班。")
             audio.playWarning()
-        } else if player.breakdownRisk > 58 {
+        } else if !hasTriggeredPlayerBreakdown && player.breakdownRisk > 58 {
+            hasTriggeredPlayerBreakdown = true
             appendEvent(title: "崩溃信号", detail: "心理能量、面具成本和暴露风险叠加到了危险区。")
             presentEvent(
                 kind: .playerBreakdown,
@@ -746,7 +749,7 @@ final class GameManager: ObservableObject {
     }
 
     private func endingStory(kind: EndingStoryKind) -> EndingStory {
-        let peaks = Int(max(1, ceil(player.stress / 24)))
+        let peaks = estimatedAnxietyPeaks
         let time = clockText
         switch kind {
         case .breakdown:
@@ -890,14 +893,14 @@ final class GameManager: ObservableObject {
     }
 
     private func endingMetrics(extra: [EndingMetric] = []) -> [EndingMetric] {
-        let anxiousPeaks = Int(max(1, ceil(player.stress / 24)))
+        let anxiousPeaks = estimatedAnxietyPeaks
         let energySpent = Int((100 - player.psychicEnergy).clamped(to: 0...100))
         let maskLoad = Int(player.maskCost)
         let supportBuffer = Int(player.support)
         let classRisk = classmates.filter { $0.stress > 76 || $0.state == .crying }.count
 
         return [
-            EndingMetric(title: "焦虑峰值", value: "\(anxiousPeaks)", note: "由压力、暴露和心理能量共同估算"),
+            EndingMetric(title: "焦虑峰值", value: "\(anxiousPeaks)", note: "按整晚连续高负荷片段估算"),
             EndingMetric(title: "心理消耗", value: "\(energySpent)", note: "今晚从能量池中消耗的近似值"),
             EndingMetric(title: "面具负荷", value: "\(maskLoad)", note: "维持好学生形象的心理成本"),
             EndingMetric(title: "支持缓冲", value: "\(supportBuffer)", note: "关系越强，崩溃阈值越高"),
@@ -910,7 +913,7 @@ final class GameManager: ObservableObject {
     }
 
     private func endingComparisons() -> [EndingComparison] {
-        let anxiousPeaks = Double(max(1, ceil(player.stress / 24)))
+        let anxiousPeaks = Double(estimatedAnxietyPeaks)
         let referencePeaks = 5.2
         let shorterStudy = max(1.0, settings.studyHours - 1)
         let shorterEstimate = max(1.0, anxiousPeaks - (settings.studyHours - shorterStudy) * 1.1 - (settings.allowsWhispering ? 0.2 : 0.6))
@@ -1862,6 +1865,279 @@ final class GameManager: ObservableObject {
     var selectedReplay: TurnSnapshot? {
         guard replay.indices.contains(selectedReplayIndex) else { return nil }
         return replay[selectedReplayIndex]
+    }
+
+    var estimatedAnxietyPeaks: Int {
+        guard replay.isEmpty == false else {
+            let currentLoad = anxietyLoad(
+                energy: player.psychicEnergy,
+                stress: player.stress,
+                exposure: player.exposure,
+                support: player.support,
+                bodyNeed: max(player.hunger, player.bladder),
+                maskCost: player.maskCost
+            )
+            return max(1, currentLoad >= 70 ? 1 : Int(ceil(player.stress / 35)))
+        }
+
+        var count = 0
+        var isInsidePeak = false
+        for snapshot in replay {
+            let load = anxietyLoad(
+                energy: snapshot.energy,
+                stress: snapshot.stress,
+                exposure: snapshot.exposure,
+                support: snapshot.support,
+                bodyNeed: snapshot.bodyNeed,
+                maskCost: snapshot.maskCost
+            )
+            let entersPeak = load >= 70 || snapshot.stress >= 74
+            let exitsPeak = load < 58 && snapshot.stress < 64
+
+            if entersPeak && !isInsidePeak {
+                count += 1
+                isInsidePeak = true
+            }
+            if isInsidePeak && exitsPeak {
+                isInsidePeak = false
+            }
+        }
+
+        return max(1, count)
+    }
+
+    var teacherPostgameReflection: TeacherPostgameReflection {
+        let riskStudents = classmates.filter { $0.stress > 76 || $0.state == .crying }.count
+        let observedIssues = classmates.filter { $0.state == .usingPhone || $0.state == .sleeping || $0.state == .crying }.count
+        let managementLoad = (settings.rankingPressure * 0.42 + settings.patrolFrequency * 0.32 + teacher.fatigue * 0.26).clamped(to: 0...100)
+        let peakStress = replay.map(\.stress).max() ?? player.stress
+        let lowestEnergy = replay.map(\.energy).min() ?? player.psychicEnergy
+        let highExposureTurns = replay.filter { $0.exposure > 58 }.count
+        let actionText = replay.map(\.actionLabel).joined(separator: "、")
+        let riskiestName = highestRiskClassmate?.name ?? "那个状态最紧的学生"
+        let riskiestReason = highestRiskClassmate?.riskReason ?? "风险原因不清楚"
+        func timeText(_ ratio: Double) -> String {
+            let minutes = Int(Double(settings.totalMinutes) * ratio)
+            let total = 18 * 60 + 30 + minutes
+            return String(format: "%02d:%02d", total / 60, total % 60)
+        }
+        let monologue: String
+
+        if teacher.studentsWarned > teacher.studentsHelped && teacher.institutionalPressure > 62 {
+            monologue = "我今晚确实让教室安静了，可安静不等于安全。KPI 像一只手推着我去提醒、去巡视，却没有给我足够时间判断每个动作背后是挑衅、疲惫，还是求救。"
+        } else if teacher.studentsHelped >= max(1, teacher.studentsWarned) {
+            monologue = "我没有把每一次异常都当成纪律问题。低声问一句会多花时间，也会让我承担管理风险，但有些学生真正需要的不是更响的提醒，而是一个可以缓一下的出口。"
+        } else if teacher.fatigue > 72 {
+            monologue = "到后半段我也累了。疲惫会让判断变窄，看见小动作时更容易先想到扣分和问责，而不是这个学生为什么撑不住。"
+        } else {
+            monologue = "这间教室表面上很普通，但每个学生都在用不同方式撑住自己。教师视角能看见秩序，也应该提醒我：秩序之外还有真实状态。"
+        }
+
+        let middleText: String
+        if highExposureTurns > 0 {
+            middleText = "中段开始，我看到你有几次动作不太稳：可能是低头、桌面小动作，或者视线突然离开作业。站在讲台上，我无法知道那是想偷懒、想休息，还是身体已经撑不住。我只能先按“可能影响全班”的方式处理。"
+        } else if lowestEnergy < 28 {
+            middleText = "中段时，教室看起来很安静，但你的能量已经明显下去了。问题是，老师最容易看见的是动作，不是能量；一个太安静的学生，反而可能被我漏掉。"
+        } else {
+            middleText = "中段时，我一直在看全班节奏：谁停笔了，谁在抬头，谁因为紧张开始反复翻书。你们看到的是老师在走动，我看到的是一整间教室的风险在同时变化。"
+        }
+
+        let lateText: String
+        if teacher.fatigue > 70 {
+            lateText = "后半段我也开始疲惫。老师累的时候，判断会变短：更容易先维持秩序，更难蹲下来问一句“你是不是不舒服”。这不是借口，但确实是今晚管理质量下降的原因。"
+        } else if teacher.studentsHelped > teacher.studentsWarned {
+            lateText = "后半段我尽量把声音压低，因为公开批评会让一个学生更难说真话。关心也有风险：时间被占用、其他学生会看见、班级秩序可能松动，但有时这比多一次提醒更重要。"
+        } else {
+            lateText = "后半段我仍然要盯住纪律，因为一个班不是只有一个学生。只要有手机光、椅子声或低语扩散，整间教室的注意力都会被拉走，最后被追责的通常也是老师。"
+        }
+
+        let segments = [
+            TeacherMonologueSegment(
+                time: timeText(0),
+                title: "开场：先保住整间教室",
+                text: "晚自习刚开始，我先看的不是某一个人，而是全班有没有进入状态。今天 KPI 是 \(Int(settings.rankingPressure))，巡视要求 \(Int(settings.patrolFrequency))。如果一开始就松，后面很难收回来。"
+            ),
+            TeacherMonologueSegment(
+                time: timeText(0.36),
+                title: "中段：我只能从表面判断",
+                text: middleText
+            ),
+            TeacherMonologueSegment(
+                time: timeText(0.72),
+                title: "后段：疲惫会压缩同理心",
+                text: lateText
+            ),
+            TeacherMonologueSegment(
+                time: clockText,
+                title: "结束：我也带着不确定离开",
+                text: "这一晚结束时，我记得提醒了 \(teacher.studentsWarned) 次，关心了 \(teacher.studentsHelped) 次，也可能错过了 \(riskStudents) 个真正需要帮助的学生。最让我不安的是 \(riskiestName)：\(riskiestReason)。老师并不是总能知道答案，很多时候只能在不完整的信息里做选择。"
+            )
+        ]
+
+        let analysis = [
+            TeacherAnalysisPoint(
+                title: "老师先承担的是班级责任",
+                detail: "站在老师这边看，第一任务不是判断某个学生是不是难受，而是保证二十个人还能继续学习。秩序一旦散掉，老师会被问责，全班也会受影响。",
+                icon: "person.3.fill"
+            ),
+            TeacherAnalysisPoint(
+                title: "KPI 会让判断变窄",
+                detail: "排名压力 \(Int(settings.rankingPressure))、巡视要求 \(Int(settings.patrolFrequency)) 会把老师推向更快、更硬的管理动作。提醒学生不一定是老师冷漠，有时是系统给老师留下的最短路径。",
+                icon: "chart.bar.fill"
+            ),
+            TeacherAnalysisPoint(
+                title: "老师看到的是表面证据",
+                detail: "学生知道自己是累、饿、焦虑或想喘口气，但老师通常只看到低头、停笔、手机光、椅子声。误读不一定来自恶意，而是信息天然不对称。",
+                icon: "eye.fill"
+            ),
+            TeacherAnalysisPoint(
+                title: "关心也有现实成本",
+                detail: "低声关心一个学生需要时间、空间和班级信任。老师担心被其他学生理解成偏心，也担心一对一处理时顾不上全班。",
+                icon: "heart.text.square.fill"
+            ),
+            TeacherAnalysisPoint(
+                title: "疲惫会消耗耐心",
+                detail: "教师疲惫 \(Int(teacher.fatigue)) 时，同理心不会消失，但会变得更难调用。学生理解这一点，不是替粗暴管理开脱，而是看见老师也在压力系统里。",
+                icon: "battery.25percent"
+            ),
+            TeacherAnalysisPoint(
+                title: "更好的沟通需要双方降低成本",
+                detail: "如果学生能用低风险方式表达“我需要缓一下”，老师就更容易把管理从抓纪律转向给出口；如果制度允许短暂恢复，老师也不用每次都靠提醒维持秩序。",
+                icon: "bubble.left.and.bubble.right.fill"
+            )
+        ]
+
+        let studentTakeaway: String
+        if actionText.contains("说自己太累") || actionText.contains("低声道谢") || actionText.contains("请求") {
+            studentTakeaway = "这局里你曾经把真实状态露出一点点，所以老师更有机会理解你。理解老师的难处，不是要求学生忍耐一切，而是让你知道：清楚、低风险地表达需要，会让老师更容易站到你这边。"
+        } else if teacher.studentsWarned > teacher.studentsHelped {
+            studentTakeaway = "今晚你可能感到老师一直在管、在盯、在提醒。但从老师这边看，她也在被 KPI、全班秩序和问责压力推着走。理解这一点，能帮助你把“老师针对我”改写成“我需要找到更容易被理解的求助方式”。"
+        } else {
+            studentTakeaway = "老师并不是天然站在学生对面。她也需要线索、时间和制度空间，才能把一个异常动作理解成求助。学生理解老师的难处，能让沟通从对抗变成共同降压。"
+        }
+
+        return TeacherPostgameReflection(
+            monologue: monologue,
+            segments: segments,
+            analysis: analysis,
+            studentTakeaway: studentTakeaway,
+            metrics: [
+                EndingMetric(title: "今日KPI", value: "\(Int(settings.rankingPressure))", note: "排名和纪律考核压力"),
+                EndingMetric(title: "巡视要求", value: "\(Int(settings.patrolFrequency))", note: "越高越容易制造位置压力"),
+                EndingMetric(title: "管理负荷", value: "\(Int(managementLoad))", note: "由 KPI、巡视和疲惫估算"),
+                EndingMetric(title: "教师疲惫", value: "\(Int(teacher.fatigue))", note: "疲惫会提高误读概率"),
+                EndingMetric(title: "同理心", value: "\(Int(teacher.empathy))", note: "越高越可能转向关心"),
+                EndingMetric(title: "提醒/关心", value: "\(teacher.studentsWarned)/\(teacher.studentsHelped)", note: "前者维持秩序，后者提供支持"),
+                EndingMetric(title: "可见异常", value: "\(observedIssues)", note: "手机、困倦、崩溃等表面信号"),
+                EndingMetric(title: "高风险学生", value: "\(riskStudents)", note: "压力过高或已经外显"),
+                EndingMetric(title: "压力峰值", value: "\(Int(peakStress))", note: "老师只能通过外显动作间接感知"),
+                EndingMetric(title: "高暴露回合", value: "\(highExposureTurns)", note: "老师最容易注意到的表面异常")
+            ]
+        )
+    }
+
+    var mechanicExplanations: [MechanicExplanation] {
+        let currentAnxietyLoad = anxietyLoad(
+            energy: player.psychicEnergy,
+            stress: player.stress,
+            exposure: player.exposure,
+            support: player.support,
+            bodyNeed: max(player.hunger, player.bladder),
+            maskCost: player.maskCost
+        )
+        return [
+            MechanicExplanation(
+                title: "焦虑峰值",
+                formula: "压力 + 身体需求×0.25 + 暴露×0.20 + 能量缺口×0.35 + 面具×0.15 - 支持×0.20 ≥ 70",
+                note: "系统按整晚回放统计连续高负荷片段，低于 58 后才允许记为下一次峰值。当前负荷约 \(Int(currentAnxietyLoad))，本局估算 \(estimatedAnxietyPeaks) 次。"
+            ),
+            MechanicExplanation(
+                title: "崩溃预警",
+                formula: "压力 + 面具×0.45 + 暴露×0.25 - 心理能量 - 支持×0.18 > 58",
+                note: "当前崩溃风险约 \(Int(player.breakdownRisk))。预警一局只触发一次，避免玩家被同一种高压状态反复打断。"
+            ),
+            MechanicExplanation(
+                title: "失控与保护",
+                formula: "心理能量 ≤ 5 或 压力 ≥ 96",
+                note: "达到硬阈值时，如果支持网络高于 55，会先触发支持网络保护；否则直接进入结局。"
+            ),
+            MechanicExplanation(
+                title: "同学焦虑",
+                formula: "同学压力 > 76 为焦虑，> 92 为崩溃",
+                note: "同学压力会受排名压力、巡视、个人焦虑基线、面具强度、是否允许交流和玩家互动影响。"
+            )
+        ]
+    }
+
+    var performanceReview: PerformanceReview {
+        let actionText = replay.map(\.actionLabel).joined(separator: " ")
+        let peakStress = replay.map(\.stress).max() ?? player.stress
+        let lowestEnergy = replay.map(\.energy).min() ?? player.psychicEnergy
+        let highestBodyNeed = replay.map(\.bodyNeed).max() ?? max(player.hunger, player.bladder)
+        var strengths: [ReviewPoint] = []
+        var improvements: [ReviewPoint] = []
+
+        if actionText.contains("深呼吸") || actionText.contains("看窗外") || actionText.contains("洗") || actionText.contains("休息") {
+            strengths.append(ReviewPoint(title: "使用了恢复动作", detail: "你没有只用硬撑解决压力，至少有一次让身体先降下来。", icon: "wind"))
+        }
+        if player.helpedClassmate || actionText.contains("同桌") || actionText.contains("求助") {
+            strengths.append(ReviewPoint(title: "建立过连接", detail: "你让支持网络进入了这一晚。连接会降低崩溃阈值附近的孤立感。", icon: "person.2.fill"))
+        }
+        if player.homework >= 60 {
+            strengths.append(ReviewPoint(title: "完成了学习目标", detail: "在压力存在的情况下仍推进了作业，说明角色并不是“不努力”。", icon: "book.fill"))
+        }
+        if player.exposure < 55 {
+            strengths.append(ReviewPoint(title: "风险控制较稳", detail: "暴露值没有长期停在高位，说明你在观察、行动和收手之间做过权衡。", icon: "eye.slash.fill"))
+        }
+        if highestBodyNeed < 72 {
+            strengths.append(ReviewPoint(title: "身体需求未完全失控", detail: "饥饿和如厕需求没有压过全部注意力，身体报警保持在可处理范围。", icon: "figure.core.training"))
+        }
+        if strengths.isEmpty {
+            strengths.append(ReviewPoint(title: "撑到了复盘时刻", detail: "即使过程很乱，你仍然留下了可回看的数据和选择。复盘本身就是改善入口。", icon: "checkmark.circle.fill"))
+        }
+
+        if player.maskCost > 66 {
+            improvements.append(ReviewPoint(title: "面具负荷偏高", detail: "为了显得正常消耗了太多能量。下次可以更早用低风险方式求助或短暂恢复。", icon: "theatermasks.fill"))
+        }
+        if peakStress > 78 {
+            improvements.append(ReviewPoint(title: "压力峰值过高", detail: "压力曾经进入危险区。连续写作业或高暴露动作之间需要插入恢复动作。", icon: "waveform.path.ecg"))
+        }
+        if player.support < 34 {
+            improvements.append(ReviewPoint(title: "支持网络太薄", detail: "支持低时，同样的压力更容易变成孤独感。一次纸条或低声确认就能改变阈值。", icon: "link"))
+        }
+        if player.exposure > 68 {
+            improvements.append(ReviewPoint(title: "暴露风险偏高", detail: "手机、纸条、零食和回头确认会叠加风险。高风险后要及时切回低暴露动作。", icon: "exclamationmark.triangle.fill"))
+        }
+        if highestBodyNeed > 78 {
+            improvements.append(ReviewPoint(title: "身体需求被拖太久", detail: "饥饿或如厕需求会抢走注意力。下次可以更早选择零食、举手或课间恢复。", icon: "figure.stand"))
+        }
+        if lowestEnergy < 20 {
+            improvements.append(ReviewPoint(title: "能量见底后仍在硬撑", detail: "低能量会放大同样的压力。能量低于 25 时，优先恢复比继续加速更有效。", icon: "battery.25percent"))
+        }
+        if player.homework < 35 && player.exposure > 45 {
+            improvements.append(ReviewPoint(title: "恢复方式成本偏高", detail: "你获得了一些逃离感，但作业进度和暴露风险的交换不太划算。", icon: "iphone"))
+        }
+        if improvements.isEmpty {
+            improvements.append(ReviewPoint(title: "节奏比较平衡", detail: "本局没有明显单项失控。后续可以尝试更高排名压力或不同交流规则，看系统如何变化。", icon: "slider.horizontal.3"))
+        }
+
+        let encouragement: String
+        if player.stress >= 90 || player.psychicEnergy <= 12 {
+            encouragement = "这不是“做得差”，而是系统把你推到了过载边缘。真正有价值的是识别最早的报警信号，而不是责怪最后的失控。"
+        } else if player.helpedClassmate || player.support >= 55 {
+            encouragement = "你没有把晚自习只玩成个人生存。能在压力里保留一点连接，是这一局最重要的进步。"
+        } else if player.homework >= 70 {
+            encouragement = "你完成了很多任务，但结算也提醒你：结果好不代表代价低。下次可以试着让完成度和恢复空间同时存在。"
+        } else {
+            encouragement = "这一晚没有标准答案。你做的每个选择都在学习、身体、关系和风险之间交换，复盘能帮你找到更低成本的下一次。"
+        }
+
+        return PerformanceReview(strengths: strengths, improvements: improvements, encouragement: encouragement)
+    }
+
+    private func anxietyLoad(energy: Double, stress: Double, exposure: Double, support: Double, bodyNeed: Double, maskCost: Double) -> Double {
+        (stress + bodyNeed * 0.25 + exposure * 0.20 + (100 - energy) * 0.35 + maskCost * 0.15 - support * 0.20)
+            .clamped(to: 0...120)
     }
 
     private func recordSnapshot(actionLabel: String) {
