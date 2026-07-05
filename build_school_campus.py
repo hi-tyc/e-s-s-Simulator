@@ -896,6 +896,65 @@ def make_sports_health_detail():
     cube("设施索引_体育健康完整系统", (61, -48.5, 2.35), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_security_fire_resilience_detail():
+    # Smart security and emergency resilience layer: sensing, response, backup power, and shelter supplies.
+    security_nodes = [
+        ("周界入侵探测器_北西", -52, 54.7, MATS["screen"]),
+        ("周界入侵探测器_北中", 0, 54.7, MATS["screen"]),
+        ("周界入侵探测器_北东", 52, 54.7, MATS["screen"]),
+        ("周界入侵探测器_西侧", -74.7, 12, MATS["screen"]),
+        ("周界入侵探测器_东侧", 74.7, 12, MATS["screen"]),
+        ("访客证件核验终端", -10.5, -52.3, MATS["screen"]),
+        ("车辆道闸车牌识别", -4.5, -55.0, MATS["screen"]),
+        ("电子巡更点_教学区", -18, 18, MATS["yellow"]),
+        ("电子巡更点_生活区", 44, 38, MATS["yellow"]),
+        ("电子巡更点_运动区", 62, -38, MATS["yellow"]),
+    ]
+    for name, x, y, material in security_nodes:
+        cube(name, (x, y, 1.28), (0.72, 0.42, 1.45), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.72, 0.72, 0.42), MATS["orange"], 0.025)
+
+    for i, (x, y) in enumerate([(-38, 11), (-12, 19), (14, 19), (40, 11), (0, -17), (55, 19), (30, 36), (54, 37)]):
+        cube(f"消防报警手报按钮_{i}", (x, y, 1.15), (0.32, 0.18, 0.45), MATS["red"], 0.018)
+        cyl(f"烟感探测器_{i}", (x + 0.5, y, 2.25), 0.16, 0.06, MATS["white"], vertices=20)
+        cube(f"应急照明疏散指示_{i}", (x - 0.5, y, 1.95), (0.58, 0.12, 0.22), MATS["light"], 0.012)
+    for i, (x, y, length, rot_z) in enumerate([(-25, 8, 22, 0), (1, 12, 22, 0), (27, 8, 22, 0), (-6, -6, 34, math.radians(-28))]):
+        cube(f"连廊防火卷帘_{i}", (x, y, 2.35), (length * 0.22, 0.16, 0.75), MATS["red"], 0.012, rot_z=rot_z)
+    cube("消防报警联动主机", (-36, -11.9, 2.1), (1.4, 0.18, 1.0), MATS["red"], 0.025)
+    cube("安防事件联动平台", (-37.8, -11.9, 2.1), (1.4, 0.18, 1.0), MATS["screen"], 0.025)
+
+    resilience_nodes = [
+        ("应急物资仓库", -23, -39, MATS["yellow"]),
+        ("临时避险棚", -14, -39, MATS["white"]),
+        ("移动发电车接口", -5, -39, MATS["metal"]),
+        ("卫星通信终端", 4, -39, MATS["screen"]),
+        ("校园无线应急基站", 13, -39, MATS["blue"]),
+        ("UPS不间断电源室", -47, 23, MATS["panel"]),
+        ("储能电池舱", -51, 23, MATS["solar"]),
+        ("微电网切换柜", -55, 23, MATS["yellow"]),
+        ("应急净水装置", -69, 27, MATS["water"]),
+        ("医疗救护集结帐篷", 18, -39, MATS["red"]),
+    ]
+    for name, x, y, material in resilience_nodes:
+        cube(name, (x, y, 1.1), (3.2, 1.8, 1.7), material, 0.05)
+        cube(f"设施索引_{name}", (x, y, 0.4), (0.78, 0.78, 0.45), MATS["orange"], 0.03)
+    for i, (x1, y1, x2, y2, material) in enumerate([
+        (-47, 23, -36, -7, MATS["yellow"]),
+        (-51, 23, -18, -9, MATS["solar"]),
+        (13, -39, -36, -7, MATS["blue"]),
+        (4, -39, -36, -7, MATS["screen"]),
+    ]):
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(f"韧性系统联动线_{i}", ((x1 + x2) / 2, (y1 + y2) / 2, 0.48), (length, 0.16, 0.06), material, 0.006, rot_z=angle)
+
+    cube("校园应急指挥中心", (-36, -3.6, 2.8), (7.6, 0.18, 1.2), MATS["screen"], 0.025)
+    text("校园应急指挥中心_文字", "应急指挥：安防/消防/广播/门禁/储能/通信联动", (-36, -3.78, 2.92), 0.28, MATS["light"], rot=(math.radians(90), 0, 0))
+    cube("智慧安全韧性总览牌", (-26, -43.5, 1.35), (24, 0.38, 1.9), MATS["panel"], 0.06)
+    text("智慧安全韧性总览牌_文字", "智慧安全韧性：周界探测 / 门禁联动 / 消防报警 / 避险物资 / UPS微电网", (-26, -43.75, 1.42), 0.32, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_智慧安全韧性系统", (-26, -43.5, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -974,6 +1033,7 @@ PREVIEW_VIEWS = [
     ("14_教学楼容量与智慧教室", (66, 34, 24), (30, 12, 6), 34),
     ("15_生活后勤食堂宿舍运营", (84, 58, 24), (52, 35, 4), 30),
     ("16_体育健康室内外系统", (84, -56, 26), (52, -18, 4), 30),
+    ("17_智慧安全消防韧性系统", (-82, -62, 25), (-24, -27, 2), 28),
 ]
 
 
@@ -1044,6 +1104,7 @@ def build_scene():
     make_teaching_detail_and_capacity_schedule()
     make_living_logistics_detail()
     make_sports_health_detail()
+    make_security_fire_resilience_detail()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
