@@ -70,8 +70,9 @@ The full campus scene includes:
 - Low-carbon science operations: PV inverters, combiner boxes, carbon/energy dashboard, submetering, EV and school-bus charging, rainwater reuse, reclaimed-water treatment, permeable paving sample, smart irrigation, soil moisture, water quality, biodiversity plot, insect hotel, bird observation, rooftop greening, heat-island/noise monitoring, microclimate tower, and operations digital twin board.
 - Culture/arts/student center: black-box theater, small stage, choir and dance rehearsal, instrument and costume storage, gallery, ceramics studio, campus radio, TV studio, recording room, media editing, student union, club rooms, media release screen, display corridor, club fair plaza, culture wall, flag ceremony court, motto stone, and activity information screen.
 - Transport/accessibility operations: parent quick drop-off, waiting canopy, student queue buffer, visitor drop-off, bus canopy, shared-bike parking, pedestrian/bus/parent/bike/logistics/accessibility flow layers, accessible elevator entries, accessible toilet, tactile paving nodes, traffic guidance screens, parking availability display, flow detector, violation camera, logistics reservation terminal, and emergency vehicle staging.
+- MEP/building operations: power feeders, fiber ring, fire water, domestic water, chilled water, rainwater reuse, sewage drainage, kitchen gas line, electrical/low-voltage/plumbing risers, rooftop AHUs, smoke exhaust, kitchen exhaust, roof tank, fire pressure tank, elevator machine rooms, BMS sensors, utility-gallery environmental sensors, sump pump pit, and ventilation shaft.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 20 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 21 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 

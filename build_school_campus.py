@@ -1130,6 +1130,81 @@ def make_transport_accessibility_operations():
     cube("设施索引_交通到达无障碍运营", (18, -59.0, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_mep_utility_operations():
+    # MEP utility network: show how the central gallery feeds buildings with power, fiber, water, HVAC, drainage, and gas.
+    utility_routes = [
+        ("电力馈线_配电到教学区", -57, -9, -8, 7, MATS["yellow"], 0.18),
+        ("电力馈线_配电到生活区", -57, -9, 35, 22, MATS["yellow"], 0.18),
+        ("光纤环网_科技楼到教学区", -36, -7, -8, 7, MATS["blue"], 0.16),
+        ("光纤环网_科技楼到生活区", -36, -7, 35, 22, MATS["blue"], 0.16),
+        ("消防水管_泵房到教学区", -69, 31, -8, 7, MATS["red"], 0.16),
+        ("消防水管_泵房到体育区", -69, 31, 55, 11, MATS["red"], 0.16),
+        ("生活给水管_水泵房到宿舍", -54, 31, 54, 31, MATS["water"], 0.16),
+        ("冷冻水管_能源站到教学区", -59, 35.5, -8, 7, MATS["white"], 0.16),
+        ("冷冻水管_能源站到体育馆", -59, 35.5, 55, 11, MATS["white"], 0.16),
+        ("雨水回用管_水罐到花园", -72, 39, -14, 38.5, MATS["green"], 0.14),
+        ("污水排水管_生活区到处理", 54, 31, -66.5, 45.5, MATS["metal"], 0.14),
+        ("食堂燃气管线_调压到后厨", 68, 38, 34, 36.4, MATS["orange"], 0.14),
+    ]
+    for name, x1, y1, x2, y2, material, width in utility_routes:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, -0.05), (length, width, 0.08), material, 0.006, rot_z=angle)
+        cyl(f"{name}_检修节点", (x2, y2, 0.08), 0.34, 0.1, material, vertices=24)
+
+    riser_nodes = [
+        ("强电竖井_T01", -38, 4, MATS["yellow"]),
+        ("弱电竖井_T01", -36.8, 4, MATS["blue"]),
+        ("给排水竖井_T01", -35.6, 4, MATS["water"]),
+        ("强电竖井_T02", -12, 12, MATS["yellow"]),
+        ("弱电竖井_T02", -10.8, 12, MATS["blue"]),
+        ("给排水竖井_T02", -9.6, 12, MATS["water"]),
+        ("强电竖井_T03", 14, 12, MATS["yellow"]),
+        ("弱电竖井_T03", 15.2, 12, MATS["blue"]),
+        ("给排水竖井_T03", 16.4, 12, MATS["water"]),
+        ("强电竖井_生活区", 54, 31, MATS["yellow"]),
+        ("弱电竖井_生活区", 55.2, 31, MATS["blue"]),
+        ("给排水竖井_生活区", 56.4, 31, MATS["water"]),
+    ]
+    for name, x, y, material in riser_nodes:
+        cube(name, (x, y, 4.2), (0.48, 0.48, 2.6), material, 0.025)
+        cube(f"设施索引_{name}", (x, y, 5.7), (0.52, 0.52, 0.28), MATS["orange"], 0.018)
+
+    roof_equipment = [
+        ("屋顶新风机组_图书馆", 0, -21, MATS["white"]),
+        ("屋顶新风机组_STEM", -23, -24, MATS["white"]),
+        ("屋顶新风机组_博雅", 23, -24, MATS["white"]),
+        ("屋顶新风机组_体育馆", 55, 11, MATS["white"]),
+        ("屋顶排烟风机_食堂", 30, 31, MATS["metal"]),
+        ("厨房油烟排风井", 38, 36.8, MATS["metal"]),
+        ("屋顶水箱_宿舍", 62, 31, MATS["water"]),
+        ("屋顶消防稳压罐", 52, 31, MATS["red"]),
+        ("电梯机房_教学楼", -12, 12, MATS["metal"]),
+        ("电梯机房_生活区", 54, 31, MATS["metal"]),
+    ]
+    for name, x, y, material in roof_equipment:
+        cube(name, (x, y, 8.45 if x in [55, 54, 62, 52] else 6.55), (2.1, 1.25, 0.7), material, 0.045)
+        cube(f"设施索引_{name}", (x, y, 8.95 if x in [55, 54, 62, 52] else 7.05), (0.58, 0.58, 0.3), MATS["orange"], 0.02)
+
+    control_nodes = [
+        ("BMS楼控传感器_教学区", -8, 7, MATS["screen"]),
+        ("BMS楼控传感器_生活区", 35, 22, MATS["screen"]),
+        ("BMS楼控传感器_体育区", 55, 11, MATS["screen"]),
+        ("管廊环境传感器_温湿度", -18, -11.5, MATS["screen"]),
+        ("管廊环境传感器_水浸", 0, -11.5, MATS["screen"]),
+        ("管廊环境传感器_可燃气", 35, -11.5, MATS["screen"]),
+        ("管廊排水泵坑", 24, -11.5, MATS["water"]),
+        ("管廊通风井", -30, -11.5, MATS["metal"]),
+    ]
+    for name, x, y, material in control_nodes:
+        cube(name, (x, y, 0.95), (1.1, 0.72, 1.05), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.34), (0.68, 0.68, 0.4), MATS["orange"], 0.025)
+
+    cube("机电管线楼宇运维总览牌", (-18, -15.6, 1.35), (32, 0.38, 1.9), MATS["panel"], 0.06)
+    text("机电管线楼宇运维总览牌_文字", "机电运维：电力/光纤/消防水/生活水/冷冻水/雨污排/燃气/屋顶机电/BMS", (-18, -15.85, 1.42), 0.31, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_机电管线楼宇运维", (-18, -15.6, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1212,6 +1287,7 @@ PREVIEW_VIEWS = [
     ("18_低碳生态科学运维", (-88, 72, 28), (-38, 40, 2), 30),
     ("19_文化艺术社团公共学习", (52, -58, 24), (12, -27, 3), 30),
     ("20_交通到达无障碍运营", (40, -80, 23), (5, -50, 2), 28),
+    ("21_机电管线楼宇运维", (72, 62, 34), (0, 6, 1), 28),
 ]
 
 
@@ -1286,6 +1362,7 @@ def build_scene():
     make_low_carbon_science_operations()
     make_culture_arts_student_center()
     make_transport_accessibility_operations()
+    make_mep_utility_operations()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
