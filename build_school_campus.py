@@ -1292,6 +1292,76 @@ def make_campus_governance_operations():
     cube("设施索引_校园治理运行中枢", (-46, -2.4, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_language_international_exchange_center():
+    # Foreign-language school layer: make the international and multilingual learning identity explicit.
+    center = (18.5, -17.8)
+    cube("外语国际交流中心", (center[0], center[1], 1.05), (14.5, 7.6, 2.1), MATS["brick"], 0.14)
+    cube("外语国际交流中心_暖白石基座", (center[0], center[1], 0.25), (15.0, 8.1, 0.5), MATS["stone"], 0.06)
+    cube("外语国际交流中心_玻璃共享大厅", (center[0], center[1] - 3.82, 1.45), (12.0, 0.18, 1.35), MATS["glass"], 0.025)
+    cube("世界地图互动屏", (center[0] - 4.8, center[1] - 3.95, 1.45), (2.4, 0.14, 1.15), MATS["screen"], 0.03)
+    cube("国际文化展示廊", (center[0], center[1] - 4.05, 1.16), (5.2, 0.16, 0.72), MATS["purple"], 0.025)
+    cube("外国语特色学习中心标识", (center[0] + 4.8, center[1] - 3.95, 1.45), (2.4, 0.14, 1.15), MATS["screen"], 0.03)
+    text("外国语特色学习中心标识_文字", "Foreign Language Hub", (center[0] + 4.8, center[1] - 4.08, 1.48), 0.26, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    rooms = [
+        ("同声传译实验室", 13.0, -20.0, MATS["blue"]),
+        ("多语种听说训练舱", 16.6, -20.0, MATS["screen"]),
+        ("模拟联合国教室", 20.2, -20.0, MATS["green"]),
+        ("国际辩论教室", 23.8, -20.0, MATS["purple"]),
+        ("外籍教师办公室", 12.7, -16.0, MATS["white"]),
+        ("国际交流办公室", 15.9, -16.0, MATS["stone"]),
+        ("海外升学指导中心", 19.1, -16.0, MATS["orange"]),
+        ("雅思托福机考室", 22.3, -16.0, MATS["blue"]),
+        ("小语种资源库", 25.5, -16.0, MATS["wood"]),
+        ("外文原版阅览角", 11.1, -13.2, MATS["wood"]),
+        ("姐妹学校视频连线室", 15.0, -13.2, MATS["screen"]),
+        ("语言学习AI口语亭", 18.9, -13.2, MATS["screen"]),
+        ("跨文化项目工作坊", 22.8, -13.2, MATS["green"]),
+        ("英语戏剧排练角", 26.7, -13.2, MATS["purple"]),
+        ("外事接待洽谈室", 28.0, -18.4, MATS["stone"]),
+        ("交换生服务台", 9.2, -18.4, MATS["white"]),
+    ]
+    for name, x, y, material in rooms:
+        cube(name, (x, y, 1.2), (2.3, 1.45, 1.35), material, 0.045)
+        cube(f"设施索引_{name}", (x, y, 0.35), (0.54, 0.54, 0.32), MATS["orange"], 0.018)
+
+    for i, x in enumerate([12.4, 14.4, 16.4, 18.4, 20.4, 22.4, 24.4]):
+        cube(f"文化旗帜廊_旗杆_{i}", (x, -22.45, 1.05), (0.08, 0.08, 1.7), MATS["metal"], 0.01)
+        cube(f"文化旗帜廊_旗面_{i}", (x + 0.35, -22.45, 1.65), (0.64, 0.05, 0.42), [MATS["red"], MATS["blue"], MATS["green"], MATS["yellow"], MATS["purple"], MATS["white"], MATS["orange"]][i], 0.01)
+
+    activity_nodes = [
+        ("国际周展台", 7.8, -23.2, MATS["orange"]),
+        ("外语角交流桌", 10.6, -23.2, MATS["wood"]),
+        ("跨文化圆桌区", 27.0, -23.2, MATS["wood"]),
+        ("外语演讲小舞台", 30.0, -23.2, MATS["purple"]),
+    ]
+    for name, x, y, material in activity_nodes:
+        cube(name, (x, y, 0.55), (2.1, 1.3, 0.8), material, 0.05)
+        cube(f"设施索引_{name}", (x, y, 1.08), (0.5, 0.5, 0.3), MATS["orange"], 0.016)
+
+    flows = [
+        ("国际课程走班流线_到国际部", center[0], center[1], 14, 12, MATS["blue"]),
+        ("国际课程走班流线_到图书馆", center[0], center[1], 0, -21, MATS["blue"]),
+        ("国际课程走班流线_到STEM", center[0], center[1], -23, -24, MATS["blue"]),
+        ("国际课程走班流线_到艺术社团", center[0], center[1], 12, -27, MATS["blue"]),
+    ]
+    for name, x1, y1, x2, y2, material in flows:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, 0.16), (length, 0.16, 0.08), material, 0.006, rot_z=angle)
+
+    cube("外语国际交流总览牌", (19, -11.2, 1.35), (17.5, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "外语国际交流总览牌_文字",
+        "外语特色：同传/多语种/模联/辩论/国际交流/升学指导/机考/文化展示",
+        (19, -11.45, 1.42),
+        0.28,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_外语国际交流学习中心", (19, -11.2, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1376,6 +1446,7 @@ PREVIEW_VIEWS = [
     ("20_交通到达无障碍运营", (40, -80, 23), (5, -50, 2), 28),
     ("21_机电管线楼宇运维", (72, 62, 34), (0, 6, 1), 28),
     ("22_校园治理运行中枢", (-76, -34, 24), (-25, -9, 2), 28),
+    ("23_外语国际交流学习中心", (54, -45, 21), (18, -18, 2), 30),
 ]
 
 
@@ -1452,6 +1523,7 @@ def build_scene():
     make_transport_accessibility_operations()
     make_mep_utility_operations()
     make_campus_governance_operations()
+    make_language_international_exchange_center()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
