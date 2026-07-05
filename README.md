@@ -67,8 +67,9 @@ The full campus scene includes:
 - Living/logistics operations: canteen receiving, cold/dry storage, rough processing, cooking, serving, dishwashing/disinfection, retained-sample cabinet, food-safety screen, dorm sample rooms, bathrooms, shower, laundry, study, houseparent, logistics storage, repair workshop, cold-chain bay, kitchen-waste cold box, and fume purification.
 - Sports-health system: indoor basketball, volleyball, badminton, table tennis, fitness, dance/yoga, body-test zone, retractable stand, scoreboard, sports AED/medical point, outdoor volleyball/tennis/fitness/calisthenics zones, PE office, equipment issue, injury treatment, and night-running lights.
 - Safety-resilience layer: perimeter intrusion detection, visitor/vehicle verification, patrol checkpoints, fire alarm call points, smoke detectors, emergency lighting, fire shutters, alarm/security linkage panels, emergency supplies, shelter tents, satellite communications, emergency wireless base station, UPS, battery storage, microgrid switchgear, emergency water purification, and command center.
+- Low-carbon science operations: PV inverters, combiner boxes, carbon/energy dashboard, submetering, EV and school-bus charging, rainwater reuse, reclaimed-water treatment, permeable paving sample, smart irrigation, soil moisture, water quality, biodiversity plot, insect hotel, bird observation, rooftop greening, heat-island/noise monitoring, microclimate tower, and operations digital twin board.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 17 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 18 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 
