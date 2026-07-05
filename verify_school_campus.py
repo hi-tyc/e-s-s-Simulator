@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 23
+EXPECTED_PREVIEW_COUNT = 24
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -396,6 +396,37 @@ REQUIRED_KEYWORDS = [
     "国际课程走班流线",
     "外语国际交流总览牌",
     "外语国际交流学习中心",
+    "校外城市主干路",
+    "校外慢行绿道",
+    "校外人行道",
+    "南门斑马线",
+    "行人过街安全岛",
+    "校门外减速带",
+    "公交站台",
+    "校车社会车辆分离标识",
+    "出租网约车落客区",
+    "地铁接驳步行导向牌",
+    "非机动车等候区",
+    "校门交通信号灯",
+    "学生过街按钮",
+    "校外违停抓拍摄像机",
+    "校外交通流量雷达",
+    "市政给水接入口",
+    "市政电力环网柜",
+    "市政通信光交箱",
+    "市政燃气调压箱",
+    "市政污水检查井",
+    "校外消防取水口",
+    "市政给水接驳线",
+    "市政电力接驳线",
+    "市政通信接驳线",
+    "市政燃气接驳线",
+    "市政污水外排线",
+    "方山生态缓冲林",
+    "方山背景观景平台",
+    "方山背景说明牌",
+    "校外周边市政界面总览牌",
+    "校外周边市政界面",
 ]
 
 
