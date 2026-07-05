@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 19
+EXPECTED_PREVIEW_COUNT = 20
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -291,6 +291,29 @@ REQUIRED_KEYWORDS = [
     "公告与活动信息屏",
     "文化艺术社团总览牌",
     "文化艺术社团中心",
+    "家长接送即停即走区",
+    "家长等候雨棚",
+    "学生排队缓冲区",
+    "访客登记落客点",
+    "校车候车雨棚",
+    "共享单车停放区",
+    "步行优先流线",
+    "家长接送流线",
+    "校车运行流线",
+    "自行车骑行流线",
+    "后勤车辆分流线",
+    "无障碍到达流线",
+    "无障碍电梯入口",
+    "无障碍卫生间_入口",
+    "盲道节点",
+    "交通诱导屏",
+    "停车余位显示屏",
+    "交通流量检测器",
+    "违停抓拍摄像机",
+    "后勤车辆预约终端",
+    "应急车辆集结位",
+    "交通到达无障碍总览牌",
+    "交通到达无障碍运营",
 ]
 
 
