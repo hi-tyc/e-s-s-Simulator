@@ -10,6 +10,7 @@ DerivedData/
 
 # 构建产物 (README 记录的分发目录, 不入库)
 dist/
+*.app/
 
 # macOS
 .DS_Store

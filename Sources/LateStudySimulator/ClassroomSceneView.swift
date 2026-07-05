@@ -2,18 +2,51 @@ import SceneKit
 import SwiftUI
 
 @MainActor
+final class StudentInputSCNView: SCNView {
+    var onDragged: ((NSEvent) -> Void)?
+    var onKeyChanged: ((NSEvent, Bool) -> Void)?
+    var onModifierChanged: ((NSEvent) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onDragged?(event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        onKeyChanged?(event, true)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        onKeyChanged?(event, false)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        onModifierChanged?(event)
+    }
+}
+
+@MainActor
 struct ClassroomSceneView: NSViewRepresentable {
     @ObservedObject var game: GameManager
 
     func makeNSView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = StudentInputSCNView()
         view.scene = context.coordinator.scene
         view.pointOfView = context.coordinator.cameraRig
         view.backgroundColor = NSColor(calibratedRed: 0.04, green: 0.045, blue: 0.05, alpha: 1)
         view.allowsCameraControl = false
         view.rendersContinuously = true
         view.preferredFramesPerSecond = 60
+        context.coordinator.installInput(on: view)
         context.coordinator.update(game: game)
+        DispatchQueue.main.async {
+            view.window?.makeFirstResponder(view)
+        }
         return view
     }
 
@@ -40,6 +73,8 @@ final class ClassroomCoordinator {
     private let clockHourHandNode = SCNNode()
     private let clockMinuteHandNode = SCNNode()
     private let homeworkProgressNode = SCNNode()
+    private let homeworkSheetNode = SCNNode()
+    private let penNode = SCNNode()
     private let leftHandNode = SCNNode()
     private let rightHandNode = SCNNode()
     private let drawerNode = SCNNode()
@@ -51,19 +86,46 @@ final class ClassroomCoordinator {
     private let seatTensionNode = SCNNode()
     private let outsideSkyNode = SCNNode()
     private let outsideLampNode = SCNNode()
+    private let outsideCloudNode = SCNNode()
+    private let outsideRainNode = SCNNode()
+    private let outsideSunNode = SCNNode()
+    private let outsideMoonNode = SCNNode()
     private var fanNodes: [SCNNode] = []
     private var classmateNodes: [Int: SCNNode] = [:]
     private var classmateStates: [Int: ClassmateState] = [:]
     private var classmateProfileSignature = ""
-    private var lastFanActive = false
+    private var lastFanSpinDuration: Double = 0
     private var lastPose: CameraPose = .forward
     private var lastViewMode: ViewMode = .student
+    private weak var currentGame: GameManager?
+    private var pressedKeys: Set<Character> = []
+    private var movementTimer: Timer?
+    private var lastMovementTick = Date()
 
     init() {
         buildScene()
     }
 
+    func installInput(on view: StudentInputSCNView) {
+        view.onDragged = { [weak self] event in
+            self?.handleMouseDragged(event)
+        }
+        view.onKeyChanged = { [weak self] event, isDown in
+            self?.handleKey(event, isDown: isDown)
+        }
+        view.onModifierChanged = { [weak self] event in
+            self?.handleModifier(event)
+        }
+        movementTimer?.invalidate()
+        movementTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.tickMovement()
+            }
+        }
+    }
+
     func update(game: GameManager) {
+        currentGame = game
         let signature = profileSignature(for: game.classmates)
         if !game.classmates.isEmpty && signature != classmateProfileSignature {
             rebuildClassmates(with: game.classmates)
@@ -78,6 +140,9 @@ final class ClassroomCoordinator {
             SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             applyCameraMode(game: game, teacherPosition: teacherNode.position)
             SCNTransaction.commit()
+        }
+        if game.freeRoam.isActive {
+            applyCameraMode(game: game, teacherPosition: teacherNode.position)
         }
 
         let teacherPath: [SCNVector3] = [
@@ -98,16 +163,16 @@ final class ClassroomCoordinator {
         }
         ambientNode.light?.intensity = 120 + 110 * game.classroomLightLevel + (game.currentPeriod == .third ? -25 : 0)
         playerPhoneNode.opacity = game.audioCues.first?.kind == .phone ? 1.0 : 0.25
-        updateClock(text: game.clockText)
+        updateClock(game: game)
         updateBlackboard(game: game)
         updateTimeAtmosphere(game: game)
         updateFans(game: game)
         updateDeskState(game: game)
         if let camera = cameraRig.camera {
-            let fatigue = 1 - game.player.focusQuality
+            let fatigue = game.viewMode == .teacher ? game.teacher.fatigue / 140 : 1 - game.player.focusQuality
             let eventIntensity = eventVisualIntensity(game: game)
             camera.fStop = 1.6 + fatigue * 7.0 + eventIntensity.blur
-            camera.focusDistance = game.cameraPose == .desk ? 0.55 : (game.cameraPose == .board ? 5.8 : 1.5)
+            camera.focusDistance = game.viewMode == .teacher ? 4.2 : (game.cameraPose == .desk ? 0.55 : (game.cameraPose == .board ? 5.8 : 1.5))
             camera.vignettingIntensity = 0.45 + fatigue * 1.15 + eventIntensity.vignette
             camera.vignettingPower = 0.8 + fatigue * 1.5 + eventIntensity.vignette
             camera.saturation = CGFloat(1.0 - fatigue * 0.34 - eventIntensity.desaturation)
@@ -127,6 +192,7 @@ final class ClassroomCoordinator {
 
     private func buildScene() {
         scene.rootNode.addChildNode(makeEnvironment())
+        scene.rootNode.addChildNode(makeCorridor())
         scene.rootNode.addChildNode(makeFurniture())
         scene.rootNode.addChildNode(makeLighting())
         scene.rootNode.addChildNode(makePlayerDeskProps())
@@ -157,16 +223,23 @@ final class ClassroomCoordinator {
     private func applyCameraMode(game: GameManager, teacherPosition: SCNVector3) {
         switch game.viewMode {
         case .student:
-            let height: Float = game.player.posture == .standing ? 1.58 : 1.18
-            let stressSway = Float(min(0.035, game.player.stress / 2_500))
-            let attentionDip = Float(max(0, 35 - game.player.visualAttention) / 1_200)
-            cameraRig.position = SCNVector3(-0.6 + stressSway, height - attentionDip, 1.5)
-            cameraRig.eulerAngles = game.cameraPose.angles
-            cameraRig.camera?.fieldOfView = 100
+            if game.freeRoam.isActive {
+                cameraRig.position = SCNVector3(Float(game.freeRoam.positionX), 1.58, Float(game.freeRoam.positionZ))
+                cameraRig.eulerAngles = SCNVector3(Float(game.freeRoam.pitch), Float(game.freeRoam.yaw), game.freeRoam.isSideways ? 0.08 : 0)
+                cameraRig.camera?.fieldOfView = 92
+            } else {
+                let height: Float = game.player.posture == .standing ? 1.58 : 1.18
+                let stressSway = Float(min(0.035, game.player.stress / 2_500))
+                let attentionDip = Float(max(0, 35 - game.player.visualAttention) / 1_200)
+                cameraRig.position = SCNVector3(-0.6 + stressSway, height - attentionDip, 1.5)
+                cameraRig.eulerAngles = SCNVector3(Float(game.studentLookPitch), Float(game.studentLookYaw), 0)
+                cameraRig.camera?.fieldOfView = 100
+            }
         case .teacher:
             cameraRig.position = SCNVector3(teacherPosition.x, 1.48, teacherPosition.z + 0.18)
-            cameraRig.eulerAngles = teacherEulerAngles(from: cameraRig.position, to: SCNVector3(0, 0.8, 0.2))
-            cameraRig.camera?.fieldOfView = 82
+            let target = teacherCameraTarget(game: game)
+            cameraRig.eulerAngles = teacherEulerAngles(from: cameraRig.position, to: target)
+            cameraRig.camera?.fieldOfView = game.teacher.focusMode == .wholeClass ? 88 : 74
         }
     }
 
@@ -188,13 +261,81 @@ final class ClassroomCoordinator {
         return SCNVector3(pitch, yaw, 0)
     }
 
+    private func teacherCameraTarget(game: GameManager) -> SCNVector3 {
+        switch game.teacher.focusMode {
+        case .wholeClass:
+            return SCNVector3(0, 0.88, 0.15)
+        case .selectedStudent:
+            if let target = game.selectedTeacherTarget {
+                return classmateHeadPosition(seat: target.seat)
+            }
+            return SCNVector3(0, 0.88, 0.15)
+        case .blackboard:
+            return SCNVector3(0, 1.88, -5.7)
+        case .rearDoor:
+            return SCNVector3(-3.9, 1.25, 4.25)
+        }
+    }
+
+    private func handleMouseDragged(_ event: NSEvent) {
+        currentGame?.rotateStudentView(deltaX: event.deltaX, deltaY: event.deltaY)
+    }
+
+    private func handleKey(_ event: NSEvent, isDown: Bool) {
+        let character: Character
+        if event.keyCode == 49 {
+            character = " "
+        } else if let first = event.charactersIgnoringModifiers?.lowercased().first {
+            character = first
+        } else {
+            return
+        }
+        guard character == " " else { return }
+        if isDown {
+            pressedKeys.insert(character)
+        } else {
+            pressedKeys.remove(character)
+        }
+    }
+
+    private func handleModifier(_ event: NSEvent) {
+        currentGame?.setFreeRoamSideways(event.modifierFlags.contains(.shift))
+    }
+
+    private func tickMovement() {
+        guard let game = currentGame, game.freeRoam.isActive else {
+            lastMovementTick = Date()
+            return
+        }
+        let now = Date()
+        let delta = min(0.05, now.timeIntervalSince(lastMovementTick))
+        lastMovementTick = now
+
+        var forward = 0.0
+        if pressedKeys.contains(" ") { forward = 1 }
+        if forward != 0 {
+            game.moveStudentFreeRoam(forward: forward, strafe: 0, deltaTime: delta)
+        }
+    }
+
+    private func classmateHeadPosition(seat: (row: Int, column: Int)) -> SCNVector3 {
+        let x = Float(seat.column) * 1.2 - 2.4
+        let z = Float(seat.row) * 1.45 - 2.0
+        return SCNVector3(x, 1.22, z)
+    }
+
     private func makeEnvironment() -> SCNNode {
         let root = SCNNode()
         root.addChildNode(box(width: 8, height: 0.04, length: 12, color: NSColor(calibratedRed: 0.48, green: 0.38, blue: 0.28, alpha: 1), position: SCNVector3(0, -0.02, 0)))
         root.addChildNode(box(width: 8, height: 3.5, length: 0.06, color: wallColor, position: SCNVector3(0, 1.75, -6)))
         root.addChildNode(box(width: 8, height: 3.5, length: 0.06, color: wallColor, position: SCNVector3(0, 1.75, 6)))
         root.addChildNode(box(width: 0.06, height: 3.5, length: 12, color: wallColor, position: SCNVector3(-4, 1.75, 0)))
-        root.addChildNode(box(width: 0.06, height: 3.5, length: 12, color: wallColor, position: SCNVector3(4, 1.75, 0)))
+        root.addChildNode(box(width: 0.06, height: 3.5, length: 1.35, color: wallColor, position: SCNVector3(4, 1.75, -5.325)))
+        root.addChildNode(box(width: 0.06, height: 3.5, length: 1.45, color: wallColor, position: SCNVector3(4, 1.75, -1.775)))
+        root.addChildNode(box(width: 0.06, height: 3.5, length: 2.05, color: wallColor, position: SCNVector3(4, 1.75, 3.025)))
+        root.addChildNode(box(width: 0.06, height: 3.5, length: 0.78, color: wallColor, position: SCNVector3(4, 1.75, 5.61)))
+        root.addChildNode(box(width: 0.06, height: 0.62, length: 5.4, color: wallColor, position: SCNVector3(4, 0.31, 0.85)))
+        root.addChildNode(box(width: 0.06, height: 0.72, length: 5.4, color: wallColor, position: SCNVector3(4, 3.14, 0.85)))
         root.addChildNode(box(width: 8, height: 0.04, length: 12, color: NSColor(calibratedWhite: 0.93, alpha: 1), position: SCNVector3(0, 3.52, 0)))
         root.addChildNode(makeDoors())
 
@@ -208,23 +349,154 @@ final class ClassroomCoordinator {
         return root
     }
 
-    private func makeWindowLayer() -> SCNNode {
+    private func makeCorridor() -> SCNNode {
         let root = SCNNode()
-        for x in [-3.96, 3.96] {
-            for z in [-2.9, 1.2] {
-                root.addChildNode(box(width: 0.04, height: 1.05, length: 1.4, color: NSColor(calibratedRed: 0.68, green: 0.86, blue: 1.0, alpha: 0.28), position: SCNVector3(Float(x), 1.7, Float(z))))
-            }
+        let floorColor = NSColor(calibratedRed: 0.34, green: 0.35, blue: 0.36, alpha: 1)
+        let wall = NSColor(calibratedRed: 0.72, green: 0.74, blue: 0.7, alpha: 1)
+        let dimWall = NSColor(calibratedRed: 0.52, green: 0.55, blue: 0.55, alpha: 1)
+
+        root.addChildNode(box(width: 2.8, height: 0.035, length: 17.2, color: floorColor, position: SCNVector3(5.25, -0.018, 0)))
+        root.addChildNode(box(width: 2.8, height: 0.035, length: 17.2, color: NSColor(calibratedWhite: 0.82, alpha: 1), position: SCNVector3(5.25, 2.96, 0)))
+        root.addChildNode(box(width: 0.06, height: 2.95, length: 17.2, color: dimWall, position: SCNVector3(6.62, 1.46, 0)))
+        root.addChildNode(box(width: 2.8, height: 2.95, length: 0.06, color: wall, position: SCNVector3(5.25, 1.46, -8.45)))
+        root.addChildNode(box(width: 2.8, height: 2.95, length: 0.06, color: wall, position: SCNVector3(5.25, 1.46, 8.45)))
+
+        for z in [-5.2, -4.55, -3.9, -3.25] {
+            root.addChildNode(box(width: 0.42, height: 1.05, length: 0.36, color: NSColor(calibratedRed: 0.18, green: 0.28, blue: 0.42, alpha: 1), position: SCNVector3(6.55, 0.62, Float(z))))
+            root.addChildNode(box(width: 0.03, height: 0.92, length: 0.28, color: NSColor(calibratedRed: 0.08, green: 0.13, blue: 0.2, alpha: 1), position: SCNVector3(6.32, 0.63, Float(z))))
+        }
+        for z in [-7.55, -6.85, 6.75, 7.45] {
+            root.addChildNode(box(width: 0.42, height: 1.05, length: 0.36, color: NSColor(calibratedRed: 0.18, green: 0.28, blue: 0.42, alpha: 1), position: SCNVector3(6.55, 0.62, Float(z))))
+            root.addChildNode(box(width: 0.03, height: 0.92, length: 0.28, color: NSColor(calibratedRed: 0.08, green: 0.13, blue: 0.2, alpha: 1), position: SCNVector3(6.32, 0.63, Float(z))))
+        }
+        for z in [-0.9, -0.2, 0.5, 1.2, 1.9, 2.6] {
+            root.addChildNode(box(width: 0.36, height: 0.95, length: 0.32, color: NSColor(calibratedRed: 0.19, green: 0.27, blue: 0.36, alpha: 1), position: SCNVector3(6.55, 0.58, Float(z))))
+            root.addChildNode(box(width: 0.024, height: 0.82, length: 0.24, color: NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.18, alpha: 1), position: SCNVector3(6.32, 0.58, Float(z))))
         }
 
-        outsideSkyNode.addChildNode(box(width: 0.03, height: 1.0, length: 5.4, color: NSColor(calibratedRed: 0.03, green: 0.05, blue: 0.13, alpha: 1), position: SCNVector3(0, 0, 0)))
-        outsideSkyNode.position = SCNVector3(-4.04, 1.72, -0.85)
+        let corridorLight = SCNLight()
+        corridorLight.type = .omni
+        corridorLight.intensity = 210
+        corridorLight.color = NSColor(calibratedRed: 0.86, green: 0.92, blue: 1.0, alpha: 1)
+        let lightNode = SCNNode()
+        lightNode.light = corridorLight
+        lightNode.position = SCNVector3(5.15, 2.72, -4.35)
+        root.addChildNode(lightNode)
+        root.addChildNode(box(width: 0.9, height: 0.02, length: 0.18, color: NSColor(calibratedWhite: 0.92, alpha: 1), position: SCNVector3(5.15, 2.9, -4.35)))
+        for z in [-0.6, 1.35, 2.85] {
+            let windowLight = SCNLight()
+            windowLight.type = .omni
+            windowLight.intensity = 120
+            windowLight.color = NSColor(calibratedRed: 0.86, green: 0.92, blue: 1.0, alpha: 1)
+            let windowLightNode = SCNNode()
+            windowLightNode.light = windowLight
+            windowLightNode.position = SCNVector3(5.15, 2.55, Float(z))
+            root.addChildNode(windowLightNode)
+            root.addChildNode(box(width: 0.72, height: 0.018, length: 0.14, color: NSColor(calibratedWhite: 0.92, alpha: 1), position: SCNVector3(5.15, 2.88, Float(z))))
+        }
+
+        root.addChildNode(makeCorridorDoor(label: "高二(2)班", z: -7.25))
+        root.addChildNode(makeCorridorDoor(label: "高二(3)班", z: -4.35))
+        root.addChildNode(makeCorridorDoor(label: "高二(4)班", z: 4.65))
+        root.addChildNode(makeCorridorDoor(label: "高二(5)班", z: 7.25))
+        root.addChildNode(makeRestroomSign())
+        root.addChildNode(makeText("走廊", size: 0.09, color: NSColor(calibratedWhite: 0.12, alpha: 1), position: SCNVector3(4.72, 1.75, -5.9)))
+        return root
+    }
+
+    private func makeCorridorDoor(label: String, z: Float) -> SCNNode {
+        let root = SCNNode()
+        root.addChildNode(box(width: 0.05, height: 1.7, length: 0.78, color: NSColor(calibratedRed: 0.42, green: 0.28, blue: 0.16, alpha: 1), position: SCNVector3(4.11, 0.92, z)))
+        root.addChildNode(box(width: 0.055, height: 0.22, length: 0.72, color: NSColor(calibratedWhite: 0.88, alpha: 1), position: SCNVector3(4.08, 1.92, z)))
+        root.addChildNode(makeText(label, size: 0.045, color: NSColor(calibratedWhite: 0.08, alpha: 1), position: SCNVector3(4.045, 1.88, z - 0.25)))
+        root.addChildNode(sphere(radius: 0.026, color: NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.28, alpha: 1), position: SCNVector3(4.05, 0.98, z + 0.25)))
+        return root
+    }
+
+    private func makeRestroomSign() -> SCNNode {
+        let root = SCNNode()
+        root.addChildNode(box(width: 0.06, height: 1.55, length: 0.92, color: NSColor(calibratedRed: 0.28, green: 0.42, blue: 0.55, alpha: 1), position: SCNVector3(6.25, 0.86, 5.85)))
+        root.addChildNode(box(width: 0.065, height: 0.24, length: 0.88, color: NSColor(calibratedRed: 0.86, green: 0.94, blue: 1.0, alpha: 1), position: SCNVector3(6.18, 1.78, 5.85)))
+        root.addChildNode(makeText("洗手间", size: 0.055, color: NSColor(calibratedWhite: 0.05, alpha: 1), position: SCNVector3(6.13, 1.73, 5.58)))
+        root.addChildNode(box(width: 0.018, height: 0.78, length: 0.12, color: NSColor(calibratedWhite: 0.95, alpha: 1), position: SCNVector3(6.16, 0.78, 5.58)))
+        root.addChildNode(box(width: 0.018, height: 0.78, length: 0.12, color: NSColor(calibratedWhite: 0.95, alpha: 1), position: SCNVector3(6.16, 0.78, 6.12)))
+        return root
+    }
+
+    private func makeWindowLayer() -> SCNNode {
+        let root = SCNNode()
+        for z in [-2.9, 1.2] {
+            root.addChildNode(glassPane(width: 0.035, height: 1.05, length: 1.4, position: SCNVector3(-3.955, 1.7, Float(z))))
+            root.addChildNode(windowFrame(at: SCNVector3(-3.97, 1.7, Float(z))))
+        }
+        for z in [-0.85, 1.2, 2.75] {
+            root.addChildNode(glassPane(width: 0.035, height: 1.32, length: 1.15, position: SCNVector3(3.955, 1.78, Float(z))))
+            root.addChildNode(windowFrame(at: SCNVector3(3.97, 1.78, Float(z)), height: 1.38, length: 1.21))
+        }
+
+        outsideSkyNode.addChildNode(box(width: 0.03, height: 1.5, length: 6.4, color: NSColor(calibratedRed: 0.45, green: 0.72, blue: 0.96, alpha: 1), position: SCNVector3(0, 0, 0)))
+        outsideSkyNode.addChildNode(box(width: 0.035, height: 0.42, length: 0.7, color: NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.28, alpha: 1), position: SCNVector3(-0.008, -0.38, -2.1)))
+        outsideSkyNode.addChildNode(box(width: 0.035, height: 0.62, length: 0.85, color: NSColor(calibratedRed: 0.16, green: 0.2, blue: 0.26, alpha: 1), position: SCNVector3(-0.008, -0.28, -0.9)))
+        outsideSkyNode.addChildNode(box(width: 0.035, height: 0.52, length: 0.72, color: NSColor(calibratedRed: 0.14, green: 0.18, blue: 0.24, alpha: 1), position: SCNVector3(-0.008, -0.33, 0.55)))
+        outsideSkyNode.addChildNode(box(width: 0.035, height: 0.68, length: 0.9, color: NSColor(calibratedRed: 0.13, green: 0.17, blue: 0.22, alpha: 1), position: SCNVector3(-0.008, -0.24, 1.85)))
+        outsideSkyNode.position = SCNVector3(-4.08, 1.75, -0.85)
         root.addChildNode(outsideSkyNode)
+
+        outsideCloudNode.addChildNode(box(width: 0.032, height: 0.16, length: 0.9, color: NSColor(calibratedWhite: 0.95, alpha: 0.72), position: SCNVector3(0, 0.28, -1.7)))
+        outsideCloudNode.addChildNode(box(width: 0.032, height: 0.12, length: 1.15, color: NSColor(calibratedWhite: 0.9, alpha: 0.66), position: SCNVector3(0, 0.1, 1.1)))
+        outsideCloudNode.position = SCNVector3(-4.115, 1.78, -0.85)
+        root.addChildNode(outsideCloudNode)
+
+        outsideSunNode.addChildNode(sphere(radius: 0.13, color: NSColor(calibratedRed: 1.0, green: 0.68, blue: 0.28, alpha: 1), position: SCNVector3(0, 0, 0)))
+        outsideSunNode.position = SCNVector3(-4.13, 2.13, -2.2)
+        root.addChildNode(outsideSunNode)
+
+        outsideMoonNode.addChildNode(sphere(radius: 0.1, color: NSColor(calibratedRed: 0.88, green: 0.92, blue: 1.0, alpha: 1), position: SCNVector3(0, 0, 0)))
+        outsideMoonNode.position = SCNVector3(-4.13, 2.22, 1.7)
+        outsideMoonNode.opacity = 0
+        root.addChildNode(outsideMoonNode)
+
+        for z in stride(from: -2.9, through: 2.5, by: 0.45) {
+            let rain = box(width: 0.018, height: 0.32, length: 0.012, color: NSColor(calibratedRed: 0.68, green: 0.82, blue: 1.0, alpha: 0.58), position: SCNVector3(0, 0, Float(z)))
+            rain.eulerAngles.x = -0.22
+            outsideRainNode.addChildNode(rain)
+        }
+        outsideRainNode.position = SCNVector3(-4.14, 1.78, -0.15)
+        outsideRainNode.opacity = 0
+        root.addChildNode(outsideRainNode)
 
         outsideLampNode.addChildNode(box(width: 0.022, height: 0.72, length: 0.08, color: NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.28, alpha: 1), position: SCNVector3(0, 0, 0)))
         outsideLampNode.addChildNode(box(width: 0.024, height: 0.18, length: 0.9, color: NSColor(calibratedRed: 1.0, green: 0.62, blue: 0.18, alpha: 1), position: SCNVector3(0, 0.28, 0)))
-        outsideLampNode.position = SCNVector3(-4.075, 1.55, 1.2)
-        outsideLampNode.opacity = 0.52
+        outsideLampNode.position = SCNVector3(-4.14, 1.42, 2.45)
+        outsideLampNode.opacity = 0.18
         root.addChildNode(outsideLampNode)
+        return root
+    }
+
+    private func glassPane(width: CGFloat, height: CGFloat, length: CGFloat, position: SCNVector3) -> SCNNode {
+        let geometry = SCNBox(width: width, height: height, length: length, chamferRadius: 0.004)
+        let glass = SCNMaterial()
+        glass.diffuse.contents = NSColor(calibratedRed: 0.68, green: 0.88, blue: 1.0, alpha: 0.2)
+        glass.specular.contents = NSColor.white
+        glass.emission.contents = NSColor(calibratedRed: 0.18, green: 0.36, blue: 0.5, alpha: 0.05)
+        glass.transparency = 0.28
+        glass.blendMode = .alpha
+        glass.isDoubleSided = true
+        geometry.firstMaterial = glass
+        let node = SCNNode(geometry: geometry)
+        node.position = position
+        return node
+    }
+
+    private func windowFrame(at position: SCNVector3, height: CGFloat = 1.12, length: CGFloat = 1.46) -> SCNNode {
+        let root = SCNNode()
+        root.position = position
+        let frameColor = NSColor(calibratedRed: 0.72, green: 0.74, blue: 0.72, alpha: 1)
+        root.addChildNode(box(width: 0.055, height: height, length: 0.04, color: frameColor, position: SCNVector3(0, 0, -Float(length / 2))))
+        root.addChildNode(box(width: 0.055, height: height, length: 0.04, color: frameColor, position: SCNVector3(0, 0, Float(length / 2))))
+        root.addChildNode(box(width: 0.055, height: 0.04, length: length, color: frameColor, position: SCNVector3(0, Float(height / 2), 0)))
+        root.addChildNode(box(width: 0.055, height: 0.04, length: length, color: frameColor, position: SCNVector3(0, -Float(height / 2), 0)))
+        root.addChildNode(box(width: 0.058, height: height - 0.06, length: 0.025, color: frameColor, position: SCNVector3(0, 0, 0)))
         return root
     }
 
@@ -233,13 +505,13 @@ final class ClassroomCoordinator {
         let doorColor = NSColor(calibratedRed: 0.38, green: 0.25, blue: 0.15, alpha: 1)
         let trimColor = NSColor(calibratedRed: 0.18, green: 0.12, blue: 0.08, alpha: 1)
 
-        root.addChildNode(box(width: 0.06, height: 2.0, length: 0.92, color: doorColor, position: SCNVector3(3.97, 1.0, -4.35)))
-        root.addChildNode(box(width: 0.08, height: 2.12, length: 1.04, color: trimColor, position: SCNVector3(3.94, 1.06, -4.35)))
-        root.addChildNode(sphere(radius: 0.035, color: NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.28, alpha: 1), position: SCNVector3(3.91, 1.02, -4.02)))
+        root.addChildNode(box(width: 0.72, height: 2.0, length: 0.06, color: doorColor, position: SCNVector3(4.32, 1.0, -4.82)))
+        root.addChildNode(box(width: 0.84, height: 2.12, length: 0.08, color: trimColor, position: SCNVector3(4.26, 1.06, -4.86)))
+        root.addChildNode(sphere(radius: 0.035, color: NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.28, alpha: 1), position: SCNVector3(4.05, 1.02, -4.78)))
 
-        root.addChildNode(box(width: 0.06, height: 2.0, length: 0.92, color: doorColor, position: SCNVector3(-3.97, 1.0, 4.25)))
-        root.addChildNode(box(width: 0.08, height: 2.12, length: 1.04, color: trimColor, position: SCNVector3(-3.94, 1.06, 4.25)))
-        root.addChildNode(sphere(radius: 0.035, color: NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.28, alpha: 1), position: SCNVector3(-3.91, 1.02, 3.92)))
+        root.addChildNode(box(width: 0.72, height: 2.0, length: 0.06, color: doorColor, position: SCNVector3(4.32, 1.0, 4.65)))
+        root.addChildNode(box(width: 0.84, height: 2.12, length: 0.08, color: trimColor, position: SCNVector3(4.26, 1.06, 4.65)))
+        root.addChildNode(sphere(radius: 0.035, color: NSColor(calibratedRed: 0.86, green: 0.68, blue: 0.28, alpha: 1), position: SCNVector3(4.05, 1.02, 4.38)))
         return root
     }
 
@@ -400,10 +672,17 @@ final class ClassroomCoordinator {
 
     private func makePlayerDeskProps() -> SCNNode {
         let root = SCNNode()
-        root.addChildNode(box(width: 0.52, height: 0.025, length: 0.42, color: NSColor(calibratedWhite: 0.92, alpha: 1), position: SCNVector3(-0.6, 0.78, 1.43)))
-        root.addChildNode(box(width: 0.46, height: 0.006, length: 0.04, color: NSColor(calibratedRed: 0.75, green: 0.76, blue: 0.78, alpha: 1), position: SCNVector3(-0.6, 0.804, 1.31)))
-        root.addChildNode(box(width: 0.38, height: 0.006, length: 0.028, color: NSColor(calibratedRed: 0.75, green: 0.76, blue: 0.78, alpha: 1), position: SCNVector3(-0.6, 0.805, 1.41)))
-        root.addChildNode(box(width: 0.42, height: 0.006, length: 0.028, color: NSColor(calibratedRed: 0.75, green: 0.76, blue: 0.78, alpha: 1), position: SCNVector3(-0.6, 0.806, 1.5)))
+        homeworkSheetNode.addChildNode(box(width: 0.58, height: 0.018, length: 0.48, color: NSColor(calibratedWhite: 0.94, alpha: 1), position: SCNVector3(0, 0, 0)))
+        homeworkSheetNode.addChildNode(box(width: 0.02, height: 0.004, length: 0.44, color: NSColor(calibratedRed: 0.76, green: 0.1, blue: 0.12, alpha: 1), position: SCNVector3(-0.25, 0.014, 0)))
+        for index in 0..<7 {
+            let z = -0.18 + Float(index) * 0.06
+            let lineWidth = CGFloat(index % 3 == 0 ? 0.4 : 0.46)
+            homeworkSheetNode.addChildNode(box(width: lineWidth, height: 0.004, length: 0.012, color: NSColor(calibratedRed: 0.72, green: 0.74, blue: 0.78, alpha: 1), position: SCNVector3(0.03, 0.016, z)))
+        }
+        homeworkSheetNode.position = SCNVector3(-0.6, 0.79, 1.43)
+        homeworkSheetNode.eulerAngles.y = 0.02
+        root.addChildNode(homeworkSheetNode)
+
         homeworkProgressNode.addChildNode(box(width: 1, height: 0.01, length: 0.026, color: NSColor(calibratedRed: 0.14, green: 0.42, blue: 0.95, alpha: 1), position: SCNVector3(0, 0, 0)))
         homeworkProgressNode.position = SCNVector3(-0.83, 0.815, 1.2)
         homeworkProgressNode.scale = SCNVector3(0.02, 1, 1)
@@ -421,6 +700,10 @@ final class ClassroomCoordinator {
         root.addChildNode(leftHandNode)
 
         rightHandNode.addChildNode(capsule(radius: 0.025, height: 0.28, color: skinTone, position: SCNVector3(0, 0, 0), rotation: SCNVector4(1, 0, 0, Float.pi / 2)))
+        penNode.addChildNode(capsule(radius: 0.012, height: 0.38, color: NSColor(calibratedRed: 0.08, green: 0.15, blue: 0.38, alpha: 1), position: SCNVector3(0.03, -0.01, -0.04), rotation: SCNVector4(0, 0, 1, Float.pi / 2)))
+        penNode.addChildNode(sphere(radius: 0.018, color: NSColor(calibratedRed: 0.02, green: 0.02, blue: 0.025, alpha: 1), position: SCNVector3(-0.17, -0.01, -0.04)))
+        penNode.opacity = 0.45
+        rightHandNode.addChildNode(penNode)
         rightHandNode.position = SCNVector3(-0.38, 0.83, 1.6)
         rightHandNode.eulerAngles.y = 0.36
         root.addChildNode(rightHandNode)
@@ -434,7 +717,6 @@ final class ClassroomCoordinator {
         playerPhoneNode.position = SCNVector3(-0.22, 0.79, 1.55)
         playerPhoneNode.opacity = 0.25
         root.addChildNode(playerPhoneNode)
-        root.addChildNode(capsule(radius: 0.015, height: 0.42, color: NSColor(calibratedRed: 0.12, green: 0.18, blue: 0.5, alpha: 1), position: SCNVector3(-0.75, 0.82, 1.25), rotation: SCNVector4(0, 0, 1, Float.pi / 2)))
 
         drawerShadowNode.addChildNode(box(width: 0.42, height: 0.012, length: 0.045, color: NSColor(calibratedWhite: 0.04, alpha: 1), position: SCNVector3(0, 0, 0)))
         drawerShadowNode.position = SCNVector3(-0.6, 0.735, 1.73)
@@ -507,13 +789,11 @@ final class ClassroomCoordinator {
         return root
     }
 
-    private func updateClock(text: String) {
-        let parts = text.split(separator: ":").compactMap { Double($0) }
-        guard parts.count == 2 else { return }
-        let hour = parts[0].truncatingRemainder(dividingBy: 12)
-        let minute = parts[1]
-        let minuteAngle = -CGFloat((minute / 60) * 2 * Double.pi)
-        let hourAngle = -CGFloat(((hour + minute / 60) / 12) * 2 * Double.pi)
+    private func updateClock(game: GameManager) {
+        let startMinutes = 18 * 60 + 30
+        let totalMinutes = Double(startMinutes + game.elapsedMinutes)
+        let minuteAngle = -CGFloat((totalMinutes / 60) * 2 * Double.pi)
+        let hourAngle = -CGFloat((totalMinutes / 720) * 2 * Double.pi)
         clockMinuteHandNode.eulerAngles.z = minuteAngle
         clockHourHandNode.eulerAngles.z = hourAngle
     }
@@ -527,21 +807,22 @@ final class ClassroomCoordinator {
     private func updateTimeAtmosphere(game: GameManager) {
         let lightLevel = game.classroomLightLevel
         let period = game.currentPeriod
+        let progress = max(0, min(1, Double(game.elapsedMinutes) / Double(max(1, game.settings.totalMinutes))))
         let skyColor: NSColor
         let ambientColor: NSColor
         let lampOpacity: CGFloat
 
         switch period {
         case .first:
-            skyColor = NSColor(calibratedRed: 0.04, green: 0.06, blue: 0.15, alpha: 1)
-            ambientColor = NSColor(calibratedRed: 0.64, green: 0.68, blue: 0.76, alpha: 1)
-            lampOpacity = 0.42
+            skyColor = NSColor(calibratedRed: 0.58, green: 0.78, blue: 0.96, alpha: 1)
+            ambientColor = NSColor(calibratedRed: 0.78, green: 0.8, blue: 0.76, alpha: 1)
+            lampOpacity = 0.12
         case .breakOne, .breakTwo:
-            skyColor = NSColor(calibratedRed: 0.05, green: 0.075, blue: 0.18, alpha: 1)
-            ambientColor = NSColor(calibratedRed: 0.72, green: 0.72, blue: 0.68, alpha: 1)
-            lampOpacity = 0.62
+            skyColor = NSColor(calibratedRed: 0.72, green: 0.5, blue: 0.34, alpha: 1)
+            ambientColor = NSColor(calibratedRed: 0.74, green: 0.7, blue: 0.62, alpha: 1)
+            lampOpacity = 0.38
         case .second:
-            skyColor = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.13, alpha: 1)
+            skyColor = NSColor(calibratedRed: 0.12, green: 0.16, blue: 0.3, alpha: 1)
             ambientColor = NSColor(calibratedRed: 0.58, green: 0.62, blue: 0.72, alpha: 1)
             lampOpacity = 0.56
         case .third:
@@ -553,6 +834,21 @@ final class ClassroomCoordinator {
         ambientNode.light?.color = lightLevel < 0.6 ? NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.36, alpha: 1) : ambientColor
         outsideSkyNode.childNodes.first?.geometry?.firstMaterial?.diffuse.contents = skyColor
         outsideSkyNode.childNodes.first?.geometry?.firstMaterial?.emission.contents = skyColor.withAlphaComponent(lightLevel < 0.6 ? 0.42 : 0.12)
+        outsideCloudNode.opacity = CGFloat((0.18 + progress * 0.72 + (lightLevel < 0.6 ? 0.22 : 0)).clamped(to: 0.18...0.95))
+        outsideSunNode.opacity = CGFloat((1.0 - progress * 2.2).clamped(to: 0...1))
+        outsideSunNode.position.y = CGFloat(2.13 - progress * 0.9)
+        outsideMoonNode.opacity = CGFloat(((progress - 0.42) * 1.9).clamped(to: 0...0.88))
+        outsideMoonNode.position.y = CGFloat(1.95 + progress * 0.38)
+        let rainy = progress > 0.46 || lightLevel < 0.6
+        outsideRainNode.opacity = rainy ? CGFloat((0.2 + progress * 0.48).clamped(to: 0.28...0.72)) : 0
+        if rainy && outsideRainNode.action(forKey: "rain_fall") == nil {
+            outsideRainNode.runAction(.repeatForever(.sequence([
+                .moveBy(x: 0, y: -0.22, z: 0.04, duration: 0.34),
+                .moveBy(x: 0, y: 0.22, z: -0.04, duration: 0)
+            ])), forKey: "rain_fall")
+        } else if !rainy {
+            outsideRainNode.removeAction(forKey: "rain_fall")
+        }
         outsideLampNode.opacity = lightLevel < 0.6 ? 0.95 : lampOpacity
         outsideLampNode.childNodes.forEach {
             $0.geometry?.firstMaterial?.emission.contents = NSColor(calibratedRed: 1.0, green: 0.58, blue: 0.18, alpha: lightLevel < 0.6 ? 0.85 : 0.38)
@@ -563,6 +859,7 @@ final class ClassroomCoordinator {
         let progress = max(0.02, min(1.0, game.player.homework / 100))
         homeworkProgressNode.scale = SCNVector3(Float(progress) * 0.46, 1, 1)
         homeworkProgressNode.opacity = game.cameraPose == .desk ? 1.0 : 0.62
+        homeworkSheetNode.opacity = game.cameraPose == .desk || game.audioCues.first?.kind == .paper ? 1.0 : 0.72
 
         let bladderLoad = max(0.02, min(1.0, game.player.bladder / 100))
         bladderIndicatorNode.scale = SCNVector3(Float(bladderLoad) * 0.34, 1, 1)
@@ -578,10 +875,40 @@ final class ClassroomCoordinator {
         drawerNode.opacity = drawerOpen ? 0.92 : 0.55
         drawerShadowNode.opacity = drawerOpen ? 0.44 : 0.18
         snackWrapperNode.opacity = snackActive || game.player.hunger < 18 ? 0.95 : 0.32
-        leftHandNode.eulerAngles.x = phoneActive ? -0.08 : stressTilt + bodyTension * 0.04
-        leftHandNode.eulerAngles.z = phoneActive ? -0.2 : stressTilt + bodyTension * 0.05
-        rightHandNode.eulerAngles.x = snackActive ? -0.34 : (phoneActive ? -0.2 : -stressTilt - bodyTension * 0.04)
-        rightHandNode.eulerAngles.z = snackActive ? 0.34 : (phoneActive ? 0.24 : -stressTilt - bodyTension * 0.05)
+        penNode.opacity = phoneActive || snackActive ? 0.18 : (game.cameraPose == .desk || paperActive ? 1.0 : 0.52)
+        leftHandNode.position = game.cameraPose == .desk
+            ? SCNVector3(-0.85, 0.835, 1.52)
+            : SCNVector3(-0.86, 0.83, 1.62)
+        rightHandNode.position = paperActive
+            ? SCNVector3(-0.45, 0.842, 1.38)
+            : (game.cameraPose == .desk ? SCNVector3(-0.43, 0.835, 1.48) : SCNVector3(-0.38, 0.83, 1.6))
+
+        if paperActive {
+            leftHandNode.eulerAngles.x = 0.04
+            leftHandNode.eulerAngles.z = 0.14 + bodyTension * 0.04
+            rightHandNode.eulerAngles.x = -0.18
+            rightHandNode.eulerAngles.z = -0.24
+            if rightHandNode.action(forKey: "write_homework") == nil {
+                let stroke = SCNAction.sequence([
+                    .moveBy(x: 0.12, y: 0.002, z: -0.012, duration: 0.12),
+                    .moveBy(x: -0.1, y: -0.002, z: 0.022, duration: 0.1),
+                    .moveBy(x: 0.07, y: 0, z: -0.01, duration: 0.09),
+                    .moveBy(x: -0.09, y: 0, z: 0, duration: 0.12)
+                ])
+                rightHandNode.runAction(.repeat(stroke, count: 5), forKey: "write_homework")
+                homeworkSheetNode.runAction(.sequence([
+                    .fadeOpacity(to: 1.0, duration: 0.05),
+                    .wait(duration: 0.8),
+                    .fadeOpacity(to: game.cameraPose == .desk ? 1.0 : 0.72, duration: 0.4)
+                ]), forKey: "paper_focus")
+            }
+        } else {
+            rightHandNode.removeAction(forKey: "write_homework")
+            leftHandNode.eulerAngles.x = phoneActive ? -0.08 : stressTilt + bodyTension * 0.04
+            leftHandNode.eulerAngles.z = phoneActive ? -0.2 : stressTilt + bodyTension * 0.05
+            rightHandNode.eulerAngles.x = snackActive ? -0.34 : (phoneActive ? -0.2 : -stressTilt - bodyTension * 0.04)
+            rightHandNode.eulerAngles.z = snackActive ? 0.34 : (phoneActive ? 0.24 : -stressTilt - bodyTension * 0.05)
+        }
 
         if bodyTension > 0.1 && leftLegNode.action(forKey: "bladder_fidget") == nil {
             let left = SCNAction.rotateBy(x: 0, y: 0, z: 0.08, duration: 0.12)
@@ -739,20 +1066,29 @@ final class ClassroomCoordinator {
     }
 
     private func updateFans(game: GameManager) {
-        let active = game.currentPeriod == .third || game.classroomLightLevel < 0.6
-        guard active != lastFanActive else {
+        let spinDuration: Double
+        switch game.currentPeriod {
+        case .first:
+            spinDuration = 1.55
+        case .breakOne, .breakTwo:
+            spinDuration = 1.25
+        case .second:
+            spinDuration = 0.95
+        case .third:
+            spinDuration = 0.48
+        }
+        let adjustedDuration = game.classroomLightLevel < 0.6 ? min(spinDuration, 0.72) : spinDuration
+        guard abs(adjustedDuration - lastFanSpinDuration) > 0.02 else {
             for fan in fanNodes {
-                fan.opacity = active ? 0.62 : 0.28
+                fan.opacity = game.currentPeriod == .first ? 0.42 : 0.58
             }
             return
         }
-        lastFanActive = active
+        lastFanSpinDuration = adjustedDuration
         for fan in fanNodes {
             fan.removeAction(forKey: "spin")
-            fan.opacity = active ? 0.62 : 0.28
-            if active {
-                fan.runAction(.repeatForever(.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: game.currentPeriod == .third ? 0.42 : 0.85)), forKey: "spin")
-            }
+            fan.opacity = game.currentPeriod == .first ? 0.42 : 0.58
+            fan.runAction(.repeatForever(.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: adjustedDuration)), forKey: "spin")
         }
     }
 

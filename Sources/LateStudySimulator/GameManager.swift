@@ -3,17 +3,42 @@ import Combine
 import Foundation
 import SceneKit
 
+private struct FreeRoamRect {
+    let minX: Double
+    let maxX: Double
+    let minZ: Double
+    let maxZ: Double
+
+    func contains(x: Double, z: Double, radius: Double = 0) -> Bool {
+        x >= minX + radius && x <= maxX - radius && z >= minZ + radius && z <= maxZ - radius
+    }
+
+    func intersectsCircle(x: Double, z: Double, radius: Double) -> Bool {
+        let nearestX = x.clamped(to: minX...maxX)
+        let nearestZ = z.clamped(to: minZ...maxZ)
+        let dx = x - nearestX
+        let dz = z - nearestZ
+        return dx * dx + dz * dz < radius * radius
+    }
+}
+
 @MainActor
 final class GameManager: ObservableObject {
     @Published var gameState: GameState = .menu
     @Published var currentTurn: Int = 0
     @Published var maxTurns: Int = 18
     @Published var settings = InstitutionSettings()
+    @Published var selectedRole: PlayableRole = .regularStudent
+    @Published var activeRole: PlayableRole = .regularStudent
     @Published var currentPhase: TurnPhase = .observation
     @Published var player = PlayerState()
     @Published var teacher = TeacherState()
     @Published var cameraPose: CameraPose = .forward
+    @Published var studentLookYaw: Double = 0
+    @Published var studentLookPitch: Double = 0
+    @Published var freeRoam = StudentFreeRoamState()
     @Published var viewMode: ViewMode = .student
+    @Published var selectedTeacherTargetID: Int?
     @Published var message: String = "晚自习开始。教室里的笔尖声和风扇声混在一起。"
     @Published var classmates: [Classmate] = []
     @Published var eventLog: [EventLogEntry] = []
@@ -39,6 +64,9 @@ final class GameManager: ObservableObject {
 
     let audio = SpatialAudioManager()
     private let memoryStoreKey = "LateStudySimulator.ClassmateMemory.v1"
+    private var freeRoamTimer: Timer?
+    private let normalFreeRoamPlayerRadius = 0.19
+    private let sidewaysFreeRoamPlayerRadius = 0.115
 
     init() {
         audioAssetStatus = audio.assetStatus
@@ -49,12 +77,20 @@ final class GameManager: ObservableObject {
         currentTurn = 1
         maxTurns = settings.maxTurns
         currentPhase = .observation
+        activeRole = selectedRole
         player = PlayerState()
-        player.stress += settings.rankingPressure * 0.08
-        teacher = TeacherState(kpiPressure: settings.rankingPressure)
+        configurePlayerForSelectedRole()
+        teacher = makeTeacherState(for: activeRole)
         cameraPose = .forward
-        viewMode = .student
+        studentLookYaw = 0
+        studentLookPitch = 0
+        freeRoamTimer?.invalidate()
+        freeRoamTimer = nil
+        freeRoam = StudentFreeRoamState()
+        viewMode = activeRole.isTeacher ? .teacher : .student
         classmates = makeClassmates()
+        selectedTeacherTargetID = classmates.max { lhs, rhs in lhs.stress < rhs.stress }?.id
+        teacher.classRisk = estimatedClassRisk
         eventLog = []
         audioCues = []
         replay = []
@@ -73,10 +109,112 @@ final class GameManager: ObservableObject {
         hasTriggeredMemorySuspicion = false
         gameState = .playing
         let memoryText = classmateMemory.isEmpty ? "" : " 有 \(classmateMemory.count) 个同学还带着上一晚的关系余波。"
-        message = "18:30，晚自习开始。制度参数：\(settings.description)。你被固定在第三排中间的位置，只能靠观察和声音判断局势。\(memoryText)"
-        addMonologue("今晚要撑过去。不是表现得正常就等于真的不累。", intensity: 0.42)
+        message = "18:30，晚自习开始。角色：\(activeRole.rawValue)。制度参数：\(settings.description)。\(roleOpeningLine)\(memoryText)"
+        addMonologue(roleOpeningMonologue, intensity: activeRole.isTeacher ? 0.36 : 0.42)
         audio.start()
         updatePerception()
+    }
+
+    func returnToMenuForNewGame() {
+        freeRoamTimer?.invalidate()
+        freeRoamTimer = nil
+        freeRoam = StudentFreeRoamState()
+        audio.stop()
+        gameState = .menu
+        currentPhase = .observation
+        currentTurn = 0
+        cameraPose = .forward
+        studentLookYaw = 0
+        studentLookPitch = 0
+        viewMode = .student
+        eventLog = []
+        audioCues = []
+        monologues = []
+        replay = []
+        selectedReplayIndex = 0
+        message = "请选择角色和制度参数，开始新的一晚。"
+    }
+
+    private func configurePlayerForSelectedRole() {
+        player.stress += settings.rankingPressure * 0.08
+        switch activeRole {
+        case .honorStudent:
+            player.psychicEnergy = 68
+            player.maskCost = 38
+            player.support = 30
+            player.stress += 10
+            player.exposure = 12
+            player.homework = 18
+            player.visualAttention = 90
+        case .regularStudent:
+            player.psychicEnergy = 74
+            player.maskCost = 22
+            player.support = 42
+            player.stress += 2
+            player.exposure = 18
+            player.homework = 4
+            player.visualAttention = 84
+        case .homeroomTeacher, .counselingPatrolTeacher:
+            player.psychicEnergy = 82
+            player.maskCost = 12
+            player.support = 50
+            player.stress = max(18, settings.rankingPressure * 0.04)
+            player.exposure = 8
+            player.homework = 0
+            player.hunger = 18
+            player.bladder = 12
+            player.visualAttention = 88
+        }
+        clampPlayer()
+    }
+
+    private func makeTeacherState(for role: PlayableRole) -> TeacherState {
+        switch role {
+        case .homeroomTeacher:
+            return TeacherState(
+                kpiPressure: settings.rankingPressure + 8,
+                fatigue: 46,
+                empathy: 40,
+                studentTrust: 30,
+                counselingCapacity: 22
+            )
+        case .counselingPatrolTeacher:
+            return TeacherState(
+                kpiPressure: max(18, settings.rankingPressure * 0.42),
+                fatigue: 30,
+                empathy: 72,
+                studentTrust: 58,
+                counselingCapacity: 76
+            )
+        case .honorStudent, .regularStudent:
+            return TeacherState(kpiPressure: settings.rankingPressure)
+        }
+    }
+
+    private var roleOpeningLine: String {
+        switch activeRole {
+        case .homeroomTeacher:
+            return "你今晚不是坐在座位里，而是站在全班前面：要保住秩序，也要尽量别错过真正撑不住的人。"
+        case .honorStudent:
+            return "你被固定在第三排中间的位置，别人默认你应该稳定、认真、不会出错。"
+        case .regularStudent:
+            return "你被固定在第三排中间的位置，只能靠观察和声音判断局势。"
+        case .counselingPatrolTeacher:
+            return "你从心理支持角度巡查教室，任务不是抓违规，而是在秩序里找到能被接住的求助信号。"
+        }
+    }
+
+    private var roleOpeningMonologue: String {
+        switch activeRole {
+        case .homeroomTeacher:
+            return "今晚不能只看安静不安静，我得判断哪些沉默是真的稳定。"
+        case .honorStudent:
+            return "大家都觉得我没问题，所以我更不能看起来有问题。"
+        case .regularStudent:
+            return "今晚要撑过去。不是表现得正常就等于真的不累。"
+        case .counselingPatrolTeacher:
+            return "我不能只等学生崩溃后再出现，真正难的是提前看见。"
+        }
     }
 
     func restartWithCurrentSettings() {
@@ -128,17 +266,85 @@ final class GameManager: ObservableObject {
 
     func toggleViewMode() {
         guard case .playing = gameState else { return }
-        viewMode = viewMode == .student ? .teacher : .student
-        if viewMode == .teacher {
-            message = teacherPerspective()
-        } else {
-            message = "你回到自己的座位。刚才看到的不是答案，只是另一个被制度推着走的人。"
-            addMonologue("回到座位的一瞬间，固定感也回来了。", intensity: 0.5)
+        viewMode = activeRole.isTeacher ? .teacher : .student
+        message = activeRole.isTeacher
+            ? "教师模式固定为班主任视角。你需要通过位置、目标学生和干预方式理解全班。"
+            : "学生模式固定为学生视角。教师视角会留到结算回放中理解。"
+    }
+
+    func setTeacherLocation(_ location: TeacherLocation) {
+        guard case .playing = gameState, activeRole.isTeacher else { return }
+        teacher.location = location
+        teacher.positionIndex = location.positionIndex
+        teacher.isNearPlayer = location == .targetDesk || location == .rightAisle
+        teacher.focusMode = location == .rearDoor ? .rearDoor : (location == .podium ? .wholeClass : .selectedStudent)
+        teacher.fatigue += location == .targetDesk ? 3 : 2
+        teacher.classOrder = min(100, teacher.classOrder + (location == .podium ? 4 : 2))
+        teacher.misreadRisk += location == .rearDoor ? 4 : 1
+        clampTeacher()
+        message = "你移动到\(location.rawValue)。位置改变后，看到的信息也改变：\(teacherFocusDescription)。"
+        addAudioCue(location == .rearDoor ? .knock : .footstep, direction: location == .rearDoor ? "后方左侧" : "过道移动", intensity: 0.68, note: "教师位置变化会改变学生对风险的判断。")
+    }
+
+    func selectTeacherTarget(_ classmateID: Int) {
+        guard case .playing = gameState, activeRole.isTeacher else { return }
+        selectedTeacherTargetID = classmateID
+        teacher.focusMode = .selectedStudent
+        teacher.misreadRisk = max(0, teacher.misreadRisk - 3)
+        if let target = selectedTeacherTarget {
+            message = "你把注意力放到\(target.name)身上。表面状态：\(target.state.rawValue)，可能原因：\(target.riskReason)。"
         }
+    }
+
+    var selectedTeacherTarget: Classmate? {
+        guard let selectedTeacherTargetID else { return highestRiskClassmate }
+        return classmates.first { $0.id == selectedTeacherTargetID } ?? highestRiskClassmate
+    }
+
+    var teacherTargetCandidates: [Classmate] {
+        classmates
+            .sorted { lhs, rhs in
+                teacherTargetScore(lhs) > teacherTargetScore(rhs)
+            }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    private func teacherTargetScore(_ classmate: Classmate) -> Double {
+        classmate.stress
+            + classmate.suspicionOfPlayer * 0.4
+            + (classmate.state == .crying ? 40 : 0)
+            + (classmate.state == .usingPhone ? 18 : 0)
+            + (classmate.state == .sleeping ? 12 : 0)
+            + classmate.profile.anxiety * 0.18
+    }
+
+    var teacherFocusDescription: String {
+        switch teacher.focusMode {
+        case .wholeClass:
+            return "你能看见全班秩序，但很难判断某个学生的真实原因。"
+        case .selectedStudent:
+            let target = selectedTeacherTarget?.name ?? "目标学生"
+            return "你正在观察\(target)，能获得更细信息，也可能让 TA 更紧张。"
+        case .blackboard:
+            return "你低头看记录和 KPI，制度压力会变得更具体。"
+        case .rearDoor:
+            return "你从后门观察，表面秩序更稳定，但学生的不确定压力会上升。"
+        }
+    }
+
+    var estimatedClassRisk: Double {
+        guard !classmates.isEmpty else { return teacher.classRisk }
+        let averageStress = classmates.reduce(0) { $0 + $1.stress } / Double(classmates.count)
+        let cryingLoad = Double(classmates.filter { $0.state == .crying }.count) * 16
+        let phoneLoad = Double(classmates.filter { $0.state == .usingPhone }.count) * 5
+        let trustBuffer = teacher.studentTrust * 0.12
+        return (averageStress * 0.72 + cryingLoad + phoneLoad + teacher.institutionalPressure * 0.18 - trustBuffer).clamped(to: 0...100)
     }
 
     func setPose(_ pose: CameraPose) {
         guard case .playing = gameState else { return }
+        guard activeRole.isTeacher == false, freeRoam.isActive == false else { return }
         let previousPose = cameraPose
         cameraPose = pose
 
@@ -166,6 +372,13 @@ final class GameManager: ObservableObject {
             message = "右侧走廊有脚步声靠近，具体是谁还看不清。"
             handleEyeContact(column: 2)
             addAudioCue(.footstep, direction: "右前方", intensity: teacher.isNearPlayer ? 0.9 : 0.45, note: "脚步声从走廊方向传来。")
+        case .rear:
+            spendAttention(for: pose.visionZone, multiplier: teacher.isNearPlayer ? 1.25 : 1)
+            player.exposure += teacher.isNearPlayer ? 32 : 22
+            player.stress += teacher.isNearPlayer ? 10 : 6
+            player.maskCost += 3
+            message = "你坐着回头看向后方。这个动作能确认身后的风险，但在晚自习里非常显眼。"
+            addAudioCue(.chair, direction: "座位下方", intensity: teacher.isNearPlayer ? 0.74 : 0.5, note: "坐着回头会带动椅子和肩膀，比余光更容易暴露。")
         case .forward:
             recoverAttention(10)
             player.psychicEnergy = min(100, player.psychicEnergy + 1.5)
@@ -177,22 +390,260 @@ final class GameManager: ObservableObject {
         updatePerception()
     }
 
+    func rotateStudentView(deltaX: Double, deltaY: Double) {
+        guard case .playing = gameState, activeRole.isTeacher == false else { return }
+        let previousPose = cameraPose
+        let sensitivity = 0.006
+        studentLookYaw = normalizedAngle(studentLookYaw - deltaX * sensitivity)
+        studentLookPitch = (studentLookPitch - deltaY * sensitivity).clamped(to: -0.72...0.48)
+        if freeRoam.isActive {
+            freeRoam.yaw = studentLookYaw
+            freeRoam.pitch = studentLookPitch
+        }
+        updateCameraPoseFromLook()
+        applyRearLookRiskIfNeeded(previousPose: previousPose)
+        updatePerception()
+    }
+
+    private func updateCameraPoseFromLook() {
+        if studentLookPitch < -0.38 {
+            cameraPose = .desk
+        } else if studentLookPitch > 0.25 {
+            cameraPose = .board
+        } else if abs(studentLookYaw) > 2.35 {
+            cameraPose = .rear
+        } else if studentLookYaw > 0.42 {
+            cameraPose = .left
+        } else if studentLookYaw < -0.42 {
+            cameraPose = .right
+        } else {
+            cameraPose = .forward
+        }
+    }
+
+    private func applyRearLookRiskIfNeeded(previousPose: CameraPose) {
+        guard freeRoam.isActive == false, player.posture == .seated, previousPose != .rear, cameraPose == .rear else {
+            return
+        }
+        spendAttention(for: .rearPeripheral, multiplier: teacher.isNearPlayer ? 1.25 : 1)
+        player.exposure += teacher.isNearPlayer ? 32 : 22
+        player.stress += teacher.isNearPlayer ? 10 : 6
+        player.maskCost += 3
+        message = teacher.isNearPlayer
+            ? "你坐着回头看向后方，动作非常显眼。老师在近处时，这几乎等于把自己从普通状态里拎出来。"
+            : "你坐着回头看向后方。你获得了确定信息，但这个动作在安静教室里很难不被注意。"
+        addAudioCue(.chair, direction: "座位下方", intensity: teacher.isNearPlayer ? 0.74 : 0.5, note: "坐着回头会带动椅子和肩膀，比余光更容易暴露。")
+        clampPlayer()
+    }
+
+    private func normalizedAngle(_ angle: Double) -> Double {
+        var value = angle
+        while value > .pi { value -= .pi * 2 }
+        while value < -.pi { value += .pi * 2 }
+        return value
+    }
+
+    private func beginStudentFreeRoam() {
+        guard activeRole.isTeacher == false else { return }
+        freeRoamTimer?.invalidate()
+        let now = Date()
+        studentLookYaw = 0
+        studentLookPitch = 0
+        freeRoam = StudentFreeRoamState(
+            isActive: true,
+            positionX: -0.6,
+            positionZ: 1.65,
+            yaw: 0,
+            pitch: 0,
+            startedAt: now,
+            endsAt: now.addingTimeInterval(60),
+            hasExitedClassroom: false
+        )
+        player.posture = .standing
+        gameState = .playing
+        message = "老师点头同意。你获得 60 秒离座活动时间，可以按住画面拖动调整方向，按住空格朝当前方向往前走；窄缝处按住 Shift 侧身通过。"
+        addAudioCue(.chair, direction: "座位到过道", intensity: 0.56, note: "获批离座后，椅子声从违规风险变成了被允许的移动声。")
+        freeRoamTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.tickStudentFreeRoam()
+            }
+        }
+    }
+
+    func moveStudentFreeRoam(forward: Double, strafe: Double, deltaTime: Double) {
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return }
+        let baseSpeed = freeRoam.hasExitedClassroom ? 1.7 : 1.45
+        let speed = freeRoam.isSideways ? baseSpeed * 0.58 : baseSpeed
+        let yaw = freeRoam.yaw
+        let distance = speed * deltaTime
+        let forwardX = -sin(yaw)
+        let forwardZ = -cos(yaw)
+        let rightX = cos(yaw)
+        let rightZ = -sin(yaw)
+        let nextX = freeRoam.positionX + (forwardX * forward + rightX * strafe) * distance
+        let nextZ = freeRoam.positionZ + (forwardZ * forward + rightZ * strafe) * distance
+        let resolved = resolvedFreeRoamPosition(fromX: freeRoam.positionX, fromZ: freeRoam.positionZ, toX: nextX, toZ: nextZ)
+        freeRoam.positionX = resolved.x
+        freeRoam.positionZ = resolved.z
+        if resolved.x > 4.08 {
+            freeRoam.hasExitedClassroom = true
+            player.stress = max(0, player.stress - 0.05)
+        }
+        objectWillChange.send()
+    }
+
+    private func resolvedFreeRoamPosition(fromX: Double, fromZ: Double, toX: Double, toZ: Double) -> (x: Double, z: Double) {
+        if isFreeRoamPositionValid(x: toX, z: toZ) {
+            return (toX, toZ)
+        }
+        if isFreeRoamPositionValid(x: toX, z: fromZ) {
+            return (toX, fromZ)
+        }
+        if isFreeRoamPositionValid(x: fromX, z: toZ) {
+            return (fromX, toZ)
+        }
+        return (fromX, fromZ)
+    }
+
+    private func isFreeRoamPositionValid(x: Double, z: Double) -> Bool {
+        let radius = currentFreeRoamPlayerRadius
+        guard freeRoamWalkableRegions.contains(where: { $0.contains(x: x, z: z, radius: radius) }) else {
+            return false
+        }
+        return freeRoamObstacles.contains { $0.intersectsCircle(x: x, z: z, radius: radius) } == false
+    }
+
+    private var currentFreeRoamPlayerRadius: Double {
+        freeRoam.isSideways ? sidewaysFreeRoamPlayerRadius : normalFreeRoamPlayerRadius
+    }
+
+    func setFreeRoamSideways(_ isSideways: Bool) {
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard freeRoam.isSideways != isSideways else { return }
+        freeRoam.isSideways = isSideways
+        if isSideways {
+            player.exposure += 1.2
+            message = "你把身体侧过来，步子变慢，但更容易从桌椅缝隙里通过。"
+        } else {
+            message = "你恢复正身行走，速度更快，但通过窄缝会更困难。"
+        }
+        clampPlayer()
+    }
+
+    private var freeRoamWalkableRegions: [FreeRoamRect] {
+        [
+            FreeRoamRect(minX: -3.55, maxX: 3.72, minZ: -5.55, maxZ: 5.55),
+            FreeRoamRect(minX: 3.35, maxX: 6.22, minZ: -8.18, maxZ: 8.18)
+        ]
+    }
+
+    private var freeRoamObstacles: [FreeRoamRect] {
+        var obstacles: [FreeRoamRect] = []
+
+        for row in 0..<5 {
+            for column in 0..<4 {
+                let x = Double(column) * 1.2 - 2.4
+                let deskZ = Double(row) * 1.45 - 2.25
+                let chairZ = deskZ + 0.55
+                obstacles.append(expandedObstacle(centerX: x, centerZ: deskZ, width: 0.78, length: 0.52))
+                obstacles.append(expandedObstacle(centerX: x, centerZ: chairZ, width: 0.48, length: 0.42))
+            }
+        }
+
+        obstacles.append(expandedObstacle(centerX: 0, centerZ: -4.7, width: 2.02, length: 0.98))
+        obstacles.append(expandedObstacle(centerX: 0, centerZ: -5.94, width: 4.35, length: 0.12))
+        obstacles.append(expandedObstacle(centerX: 4.3, centerZ: -4.82, width: 0.82, length: 0.1))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: -5.32, width: 0.16, length: 1.36))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: -1.78, width: 0.16, length: 1.46))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 3.02, width: 0.16, length: 2.08))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 0.85, width: 0.16, length: 5.4))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 5.61, width: 0.16, length: 0.8))
+
+        for lockerZ in [-7.55, -6.85, -5.2, -4.55, -3.9, -3.25, 6.75, 7.45] {
+            obstacles.append(expandedObstacle(centerX: 6.55, centerZ: lockerZ, width: 0.5, length: 0.42))
+        }
+
+        return obstacles
+    }
+
+    private func expandedObstacle(centerX: Double, centerZ: Double, width: Double, length: Double) -> FreeRoamRect {
+        FreeRoamRect(
+            minX: centerX - width / 2,
+            maxX: centerX + width / 2,
+            minZ: centerZ - length / 2,
+            maxZ: centerZ + length / 2
+        )
+    }
+
+    private func tickStudentFreeRoam() {
+        guard freeRoam.isActive else {
+            freeRoamTimer?.invalidate()
+            freeRoamTimer = nil
+            return
+        }
+        if freeRoam.remainingSeconds <= 0 {
+            returnToSeatFromFreeRoam(reason: "时间到了，你回到座位。走廊里的空气留在身后，晚自习重新包围过来。")
+        } else {
+            objectWillChange.send()
+        }
+    }
+
+    func returnToSeatFromFreeRoam(reason: String? = nil) {
+        guard freeRoam.isActive else { return }
+        let exitedClassroom = freeRoam.hasExitedClassroom
+        freeRoamTimer?.invalidate()
+        freeRoamTimer = nil
+        freeRoam = StudentFreeRoamState()
+        studentLookYaw = 0
+        studentLookPitch = 0
+        cameraPose = .forward
+        player.posture = .seated
+
+        if exitedClassroom {
+            player.psychicEnergy += 16
+            recoverAttention(18)
+            player.homework = max(0, player.homework - 5)
+            player.exposure = max(0, player.exposure - 8)
+            player.stress = max(0, player.stress - 18)
+            player.bladder = max(0, player.bladder - 78)
+            addMonologue("离开教室几十秒，我才知道自己刚才一直在憋着。", intensity: 0.58)
+            message = reason ?? "你提前回到座位。短暂走出教室没有解决所有压力，但身体明显松了一点。"
+        } else {
+            player.psychicEnergy += 7
+            recoverAttention(10)
+            player.stress = max(0, player.stress - 6)
+            player.bladder = max(0, player.bladder - 10)
+            player.exposure += 3
+            message = reason ?? "你提前回到座位。你没有真正走出教室，但站起来活动让身体从僵硬里退出来一点。"
+        }
+
+        clampPlayer()
+        updateClassmates(after: nil)
+        recordSnapshot(actionLabel: exitedClassroom ? "离座活动" : "短暂站起")
+        teacherTurn()
+    }
+
     private func applyTurnStrain(from previous: CameraPose, to next: CameraPose) {
         guard previous != next else { return }
         let isSideTurn = next == .left || next == .right
         let isVerticalTurn = next == .board || next == .desk
-        guard isSideTurn || isVerticalTurn else { return }
+        let isRearTurn = next == .rear
+        guard isSideTurn || isVerticalTurn || isRearTurn else { return }
 
-        let strain = player.stress * 0.35 + max(0, 38 - player.visualAttention) + (teacher.isNearPlayer ? 18 : 0)
+        let strain = player.stress * 0.35 + max(0, 38 - player.visualAttention) + (teacher.isNearPlayer ? 18 : 0) + (isRearTurn ? 18 : 0)
         guard strain > 52 else { return }
 
-        let stressDelta = min(7, strain / 18)
+        let stressDelta = min(isRearTurn ? 10 : 7, strain / 18)
         player.stress += stressDelta
-        player.maskCost += isSideTurn ? 2 : 1
-        player.visualAttention = max(0, player.visualAttention - min(6, strain / 20))
-        message += isSideTurn
-            ? " 你转头时明显慢了一拍，脖子僵硬像是在提醒你：确认信息也有代价。"
-            : " 视线上下切换时有短暂迟滞，身体比意识更早感到紧张。"
+        player.maskCost += isRearTurn ? 4 : (isSideTurn ? 2 : 1)
+        player.visualAttention = max(0, player.visualAttention - min(isRearTurn ? 10 : 6, strain / 20))
+        if isRearTurn {
+            message += " 回头确认带来的确定感很贵：身体要转，椅子会响，老师和同学都更容易注意到你。"
+        } else {
+            message += isSideTurn
+                ? " 你转头时明显慢了一拍，脖子僵硬像是在提醒你：确认信息也有代价。"
+                : " 视线上下切换时有短暂迟滞，身体比意识更早感到紧张。"
+        }
         addAudioCue(.heartbeat, direction: "颅内", intensity: min(1, strain / 100), note: "高压下转动视线会变慢，感官管理本身也会消耗心理能量。")
     }
 
@@ -219,8 +670,8 @@ final class GameManager: ObservableObject {
 
     func execute(_ action: PlayerAction) {
         guard case .playing = gameState else { return }
-        if viewMode == .teacher {
-            executeTeacherAction(.patrol)
+        if activeRole.isTeacher {
+            executeTeacherAction(.scanClass)
             return
         }
         currentPhase = .action
@@ -338,83 +789,116 @@ final class GameManager: ObservableObject {
     func executeTeacherAction(_ action: TeacherAction) {
         guard case .playing = gameState else { return }
         currentPhase = .teacherTurn
-        let target = highestRiskClassmate
+        let target = selectedTeacherTarget
 
         switch action {
-        case .patrol:
-            teacher.positionIndex = (teacher.positionIndex + 2) % 8
+        case .scanClass:
+            teacher.focusMode = .wholeClass
+            teacher.fatigue += 3
+            teacher.classOrder = min(100, teacher.classOrder + 4)
+            teacher.classRisk = estimatedClassRisk
+            teacher.misreadRisk = max(0, teacher.misreadRisk - 4)
+            message = "你没有盯住某一个人，而是扫过全班。表面秩序 \(Int(teacher.classOrder))，真实风险约 \(Int(teacher.classRisk))。"
+            addAudioCue(.paper, direction: "教室四周", intensity: 0.36, note: "全班视角能降低误判，但需要持续消耗教师注意力。")
+        case .observeTarget:
+            teacher.focusMode = .selectedStudent
             teacher.fatigue += 4
-            teacher.kpiPressure = max(0, teacher.kpiPressure - 2)
-            player.exposure += cameraPose == .desk ? 8 : 3
-            message = "你沿着过道走了一圈。纪律看起来更稳定，但几个学生明显更紧绷了。"
-            addAudioCue(.footstep, direction: "过道移动", intensity: 0.86, note: "脚步声成为全班的压力信号。")
-        case .warn:
+            teacher.misreadRisk = max(0, teacher.misreadRisk - 8)
+            teacher.classRisk = estimatedClassRisk
+            if let target {
+                raiseClassmateStress(id: target.id, delta: 3)
+                message = "你观察\(target.name)：表面是\(target.state.rawValue)，可能原因是\(target.riskReason)。更细的信息降低误判，也让 TA 感到被盯住。"
+            } else {
+                message = "你试着观察具体学生，但没有锁定目标。"
+            }
+            addAudioCue(.teacherCough, direction: teacher.location == .rearDoor ? "后方左侧" : "过道近处", intensity: 0.38, note: "教师的停顿会成为学生判断风险的线索。")
+        case .publicWarn:
             teacher.studentsWarned += 1
             player.teacherWarnings += 1
-            teacher.kpiPressure = max(0, teacher.kpiPressure - 5)
-            teacher.fatigue += 3
+            teacher.kpiPressure = max(0, teacher.kpiPressure - 8)
+            teacher.fatigue += 4
+            teacher.classOrder = min(100, teacher.classOrder + 15)
+            teacher.studentTrust = max(0, teacher.studentTrust - 8)
+            teacher.misreadRisk = min(100, teacher.misreadRisk + 5)
             if let target {
-                raiseClassmateStress(id: target.id, delta: 10)
-                message = "你提醒了\(target.name)。表面上秩序恢复了，但你不知道这句话压在了什么上面。"
+                raiseClassmateStress(id: target.id, delta: 12)
+                message = "你公开提醒了\(target.name)。表面秩序快速恢复，但学生信任下降，目标学生压力明显上升。"
             } else {
-                message = "你提醒全班安静。声音不大，但教室立刻变硬了。"
+                message = "你公开提醒全班。它很有效，也很粗糙。"
             }
             addAudioCue(.chair, direction: "讲台前方", intensity: 0.62, note: "提醒后的椅子轻响，比回答更诚实。")
-        case .ignore:
-            teacher.kpiPressure += 5
-            teacher.fatigue = max(0, teacher.fatigue - 3)
-            player.exposure = max(0, player.exposure - 10)
-            lowerClassmateStress(delta: 3)
-            message = "你选择性放过了一些小动作。你保护了几个学生，也承担了被问责的风险。"
-            addAudioCue(.paper, direction: "教室四周", intensity: 0.3, note: "环境声回来了，说明紧张被暂时放低。")
+        case .quietWarn:
+            teacher.studentsWarned += 1
+            teacher.kpiPressure = max(0, teacher.kpiPressure - 3)
+            teacher.fatigue += 3
+            teacher.classOrder = min(100, teacher.classOrder + 7)
+            teacher.studentTrust = max(0, teacher.studentTrust - 2)
+            if let target {
+                raiseClassmateStress(id: target.id, delta: 4)
+                message = "你走近\(target.name)，压低声音提醒。秩序回升得较慢，但没有把 TA 推到全班面前。"
+            } else {
+                message = "你低声提醒附近学生，把干预控制在小范围。"
+            }
+            addAudioCue(.whisper, direction: "过道近处", intensity: 0.42, note: "低声提醒降低公开羞辱，但管理效果也更慢。")
         case .care:
             teacher.studentsHelped += 1
-            teacher.empathy += 2
+            teacher.empathy += 3
             teacher.fatigue += 5
+            teacher.studentTrust = min(100, teacher.studentTrust + 10)
+            teacher.counselingCapacity = max(0, teacher.counselingCapacity - 12)
+            teacher.kpiPressure += 3
+            teacher.classRisk = max(0, teacher.classRisk - 8)
             player.teacherCareMoments += 1
             if let target {
-                lowerClassmateStress(id: target.id, delta: 20)
-                message = "你走到\(target.name)身边，低声问：需要出去缓一下吗？这消耗时间，但也许避免了一次崩溃。"
+                lowerClassmateStress(id: target.id, delta: 16)
+                message = "你低声问\(target.name)：是不是需要缓一下？这会消耗时间和咨询容量，但能真实降低风险。"
             } else {
                 player.psychicEnergy += 9
                 player.stress = max(0, player.stress - 10)
                 message = "你没有批评，只是问了句还好吗。权力第一次没有变成压力。"
             }
             addAudioCue(.whisper, direction: "过道近处", intensity: 0.38, note: "关心必须压低声音，才不会变成公开审判。")
-        case .rest:
-            teacher.fatigue = max(0, teacher.fatigue - 12)
-            teacher.kpiPressure += 3
-            player.exposure = max(0, player.exposure - 4)
-            message = "你坐回讲台揉了揉太阳穴。你也是这个系统里会累的人。"
-            addAudioCue(.chair, direction: "讲台", intensity: 0.42, note: "椅子声暴露了老师的疲惫。")
-        case .rearDoorObserve:
-            teacher.positionIndex = 8
-            teacher.fatigue += 6
-            teacher.kpiPressure = max(0, teacher.kpiPressure - 4)
-            teacher.isNearPlayer = false
-            let suspicious = player.exposure + player.maskCost * 0.25 + (cameraPose == .desk ? 8 : 0)
-            if suspicious > 62 {
-                player.stress += 12
-                player.exposure += 8
-                teacher.studentsWarned += 1
-                message = "你从后门无声观察。学生没有听见脚步，但几个小动作在你眼里变得很明显。"
+        case .allowBreak:
+            teacher.studentsHelped += 1
+            teacher.fatigue += 4
+            teacher.kpiPressure += 6
+            teacher.classOrder = max(0, teacher.classOrder - 4)
+            teacher.studentTrust = min(100, teacher.studentTrust + 8)
+            teacher.counselingCapacity = max(0, teacher.counselingCapacity - 8)
+            if let target {
+                lowerClassmateStress(id: target.id, delta: 24)
+                message = "你允许\(target.name)离开教室几分钟。班级管理风险上升，但这给了一个学生真实出口。"
             } else {
-                player.stress += 4
-                lowerClassmateStress(delta: 2)
-                message = "你站在后门观察了一会儿。没有立刻提醒，教室里的紧张以一种无声方式扩散。"
+                message = "你允许一个明显不适的学生短暂离开。"
             }
-            addAudioCue(.knock, direction: "后方左侧", intensity: 0.3, note: "不是敲门，而是门口很轻的衣料和呼吸声。")
-        case .fakePatrol:
-            teacher.positionIndex = max(0, teacher.positionIndex - 1)
-            teacher.fatigue += 2
-            teacher.kpiPressure = max(0, teacher.kpiPressure - 3)
-            player.stress += 8
-            player.exposure += cameraPose == .desk ? 6 : 2
-            lowerClassmateStress(delta: 1)
-            message = "你故意制造了一段脚步声，又停在远处。纪律短暂收紧，但学生无法确认你到底在哪里。"
-            addAudioCue(.footstep, direction: "右前方", intensity: 0.92, note: "脚步声逼近后突然停住，这种不确定性本身就是压力。")
+            addAudioCue(.chair, direction: "过道到后门", intensity: 0.52, note: "允许离开会制造可见动作，也可能避免一次更大的崩溃。")
+        case .ignore:
+            teacher.kpiPressure += 6
+            teacher.classOrder = max(0, teacher.classOrder - 4)
+            teacher.studentTrust = min(100, teacher.studentTrust + 6)
+            teacher.classRisk = max(0, teacher.classRisk - 3)
+            teacher.fatigue = max(0, teacher.fatigue - 2)
+            if let target {
+                lowerClassmateStress(id: target.id, delta: 3)
+                message = "你选择放过\(target.name)的小动作。学生信任回升，但 KPI 风险和表面秩序压力也回来了。"
+            } else {
+                lowerClassmateStress(delta: 2)
+                message = "你选择放过一些小动作。你保护了恢复空间，也承担了被问责的风险。"
+            }
+            addAudioCue(.paper, direction: "教室四周", intensity: 0.3, note: "环境声回来了，说明紧张被暂时放低。")
+        case .rest:
+            teacher.focusMode = .blackboard
+            teacher.location = .podium
+            teacher.positionIndex = TeacherLocation.podium.positionIndex
+            teacher.fatigue = max(0, teacher.fatigue - 14)
+            teacher.counselingCapacity = min(100, teacher.counselingCapacity + 8)
+            teacher.kpiPressure += 4
+            teacher.classOrder = max(0, teacher.classOrder - 3)
+            message = "你坐回讲台休息并看了一眼记录。疲惫下降，但巡视覆盖和表面秩序会变弱。"
+            addAudioCue(.chair, direction: "讲台", intensity: 0.42, note: "椅子声暴露了老师的疲惫。")
         }
 
+        teacher.classRisk = estimatedClassRisk
         clampTeacher()
         clampPlayer()
         updateClassmates(after: nil)
@@ -643,7 +1127,7 @@ final class GameManager: ObservableObject {
     }
 
     private func calculateEnding() -> Ending {
-        if viewMode == .teacher || teacher.studentsWarned + teacher.studentsHelped > 4 {
+        if activeRole.isTeacher || teacher.studentsWarned + teacher.studentsHelped > 4 {
             return teacherEnding()
         }
 
@@ -1439,7 +1923,10 @@ final class GameManager: ObservableObject {
         let riskReason = highestRiskClassmate?.riskReason ?? "原因不明"
         let mood = teacher.fatigue > 70 ? "极度疲惫" : (teacher.fatigue > 45 ? "有些疲惫" : "还能维持")
         let place = teacher.positionIndex == 8 ? "后门" : "讲台/过道"
-        return "教师视角：你在\(place)，\(mood)，KPI压力 \(Int(teacher.kpiPressure))，同理心 \(Int(teacher.empathy))。你看见 \(suspicious) 个学生不太对劲，最担心的是\(riskName)：\(riskReason)。你也无法同时照顾所有人。"
+        let roleLine = activeRole == .counselingPatrolTeacher
+            ? "咨询容量 \(Int(teacher.counselingCapacity))，学生信任 \(Int(teacher.studentTrust))"
+            : "KPI压力 \(Int(teacher.kpiPressure))，学生信任 \(Int(teacher.studentTrust))"
+        return "教师视角：你作为\(activeRole.rawValue)在\(place)，\(mood)，\(roleLine)，同理心 \(Int(teacher.empathy))。你看见 \(suspicious) 个学生不太对劲，最担心的是\(riskName)：\(riskReason)。你也无法同时照顾所有人。"
     }
 
     private func appendEvent(title: String, detail: String) {
@@ -1455,6 +1942,7 @@ final class GameManager: ObservableObject {
 
     func resolveEventChoice(_ choice: EventChoice) {
         guard case .event(let event) = gameState else { return }
+        var shouldContinueAfterChoice = true
 
         switch choice.id {
         case "accept_warning":
@@ -1558,15 +2046,10 @@ final class GameManager: ObservableObject {
             addAudioCue(.phone, direction: "桌面偏右", intensity: 0.72, note: "黑暗里的手机声更明显。")
             message = "你借着停电看了一眼手机。那一秒很自由，也很危险。"
         case "go_washroom":
-            player.posture = .seated
-            player.psychicEnergy += 20
-            recoverAttention(18)
-            player.homework = max(0, player.homework - 5)
-            player.exposure = max(0, player.exposure - 10)
-            player.stress = max(0, player.stress - 16)
-            player.bladder = max(0, player.bladder - 78)
-            addAudioCue(.chair, direction: "桌边到后门", intensity: 0.52, note: "离开座位会制造声音，也给身体一个合法出口。")
-            message = "你被允许离开几分钟。走廊的空气不自由，但身体终于不用继续忍着。"
+            player.exposure += 4
+            player.maskCost = max(0, player.maskCost - 2)
+            beginStudentFreeRoam()
+            shouldContinueAfterChoice = false
         case "stretch_only":
             player.posture = .standing
             recoverAttention(14)
@@ -1745,6 +2228,11 @@ final class GameManager: ObservableObject {
 
         clampPlayer()
         clampTeacher()
+        if shouldContinueAfterChoice == false {
+            recordSnapshot(actionLabel: choice.title)
+            updatePerception()
+            return
+        }
         updateClassmates(after: nil)
         recordSnapshot(actionLabel: choice.title)
         continueAfterEvent()
@@ -2292,6 +2780,11 @@ final class GameManager: ObservableObject {
         teacher.kpiPressure = teacher.kpiPressure.clamped(to: 0...100)
         teacher.fatigue = teacher.fatigue.clamped(to: 0...100)
         teacher.empathy = teacher.empathy.clamped(to: 0...100)
+        teacher.studentTrust = teacher.studentTrust.clamped(to: 0...100)
+        teacher.counselingCapacity = teacher.counselingCapacity.clamped(to: 0...100)
+        teacher.classOrder = teacher.classOrder.clamped(to: 0...100)
+        teacher.classRisk = teacher.classRisk.clamped(to: 0...100)
+        teacher.misreadRisk = teacher.misreadRisk.clamped(to: 0...100)
     }
 
     private func makeClassmates() -> [Classmate] {
