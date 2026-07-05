@@ -5,16 +5,20 @@ This branch contains generated Blender assets for a modern, technology-oriented 
 - `school_campus.blend`: full campus map prototype.
 - `classroom.blend`: detailed 55-seat smart classroom prototype.
 
-The campus style is inspired by public descriptions of Nanjing Foreign Language School Fangshan Campus: red brick and warm white stone, courtyard learning clusters, a semi-open entrance ring, central water/courtyard space, separated quiet/active zones, sports facilities, living facilities, and a technology/STEM emphasis. This is a public-facing conceptual prototype, not a real security, MEP, or restricted campus drawing.
+The campus style is reconstructed from public descriptions and images of Nanjing Foreign Language School Fangshan Campus: red brick and warm white stone, a semi-open entrance academy court, north-south ceremonial axis, east-west learning street, central water/courtyard space, courtyard teaching clusters, separated quiet/active zones, sports facilities, living facilities, and a technology/STEM emphasis. This is a public-source high-similarity reconstruction prototype, not a real security, MEP, or restricted construction drawing.
 
 Reference links:
 
-- https://www.archdaily.cn/cn/936437/nan-jing-wai-guo-yu-xue-xiao-fang-shan-xiao-qu-zhu-jing-she-ji
-- https://www.gla.com.cn/en/index.php/works/nanjing-foreign-language-school-fangshan-campus/
+- https://www.archdaily.cn/cn/934588/nan-jing-wai-guo-yu-xue-xiao-fang-shan-xiao-qu-glajian-zhu-she-ji
+- https://www.archdaily.cn/cn/934588/nan-jing-wai-guo-yu-xue-xiao-fang-shan-xiao-qu-glajian-zhu-she-ji/5e586dec6ee67e38150000bc-nan-jing-wai-guo-yu-xue-xiao-fang-shan-xiao-qu-glajian-zhu-she-ji-ping-mian-tu
+- https://www.gla.com.cn/product/49.html
+- https://www.archcollege.com/47000.html
+- https://www.sinodea.com/alzs/alxq.aspx?id=93&mtt=s
 
 ## Files
 
 - `build_school_campus.py`: builds the complete campus map and preview images.
+- `append_fangshan_public_layers.py`: opens an existing campus `.blend`, appends the public-reference reconstruction and gameplay interaction layers, then regenerates campus previews.
 - `verify_school_campus.py`: verifies required campus facilities exist in `school_campus.blend`.
 - `school_campus.blend`: generated complete campus scene.
 - `campus_previews/`: exported campus preview images and `00_校园总览拼图.png`.
@@ -78,8 +82,10 @@ The full campus scene includes:
 - Wireless network and edge-computing operations: campus Wi-Fi AP coverage disks, edge-computing boxes, IoT gateways, core switch, next-generation firewall, NAC controller, security log/audit screen, backup appliance, NTP clock server, unified campus clock screens, IP broadcast terminals, AP controller links, IoT aggregation links, and security-log return route.
 - Complete building-interior coverage: every major building mass has visible interior floor plates, corridors, room programs, furniture/equipment blocks, and facility index markers, covering the guard room, library/administration, STEM, liberal-arts center, four teaching clusters, technology operations building, indoor sports hall, canteen, dormitory/living group, clinic/counseling center, and foreign-language exchange center.
 - Main gameplay teaching building: the high-school teaching cluster is modeled as a four-floor detailed interior with wide corridor depth, floor plates, classroom props, smart boards, class boards, desks/chairs, lockers, toilets with male/female/accessible zones, sinks, mirrors, west/east stair cores, elevator hall, fire hydrants, exit signs, floor wayfinding, and a main-scene overview board.
+- Gameplay navigation/interaction layer for the main teaching building: player spawn point, quest/check/save points, interactive door markers, passable corridor paths, stair/elevator vertical links, and explicit collision/boundary guide markers.
+- Fangshan public-reference reconstruction layer: visible source panels, plan-control frame, north-south and east-west axes, center water court, semi-open entrance ring control line, public-plan district bands, red-brick/warm-stone facade markers, courtyard learning clusters, shared-learning-street glass facades, and public-feature callouts.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 28 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 30 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 
@@ -101,6 +107,7 @@ From this branch root:
 
 ```bash
 /snap/blender/current/blender -b --python build_school_campus.py
+/snap/blender/current/blender -b school_campus.blend --python append_fangshan_public_layers.py
 /snap/blender/current/blender -b school_campus.blend --python verify_school_campus.py
 /snap/blender/current/blender -b --python build_modern_classroom.py
 /snap/blender/current/blender -b --python render_classroom_views.py
