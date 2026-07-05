@@ -52,6 +52,9 @@ The full campus scene includes:
 - Fire hydrants, evacuation routes, assembly areas, broadcast speakers.
 - Underground utility gallery with inspection manholes.
 - Weather station and air-quality sensor.
+- Library interior reading area, shelves, and self-checkout kiosk.
+- Sports support rooms: changing room, shower room, equipment room, referee/medical point.
+- Wayfinding screens, AED boxes, emergency phones, drinking water points, lockers, electronic class boards, visitor terminal, and charging station.
 
 ## Classroom Coverage
 
