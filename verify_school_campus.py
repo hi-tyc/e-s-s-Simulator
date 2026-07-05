@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 30
+EXPECTED_PREVIEW_COUNT = 31
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -536,6 +536,24 @@ REQUIRED_KEYWORDS = [
     "共享学习街玻璃面",
     "公开特征_暗红色面砖主材",
     "公开特征_院落化校园空间",
+    "南外方山高相似复刻",
+    "公开关键词_学苑方城",
+    "公开关键词_第三代学校",
+    "公开关键词_公学式校园",
+    "公开关键词_四学部",
+    "小学部_学部铭牌",
+    "初中部_学部铭牌",
+    "高中部_学部铭牌",
+    "国际高中部_学部铭牌",
+    "南侧城市展示红砖表皮",
+    "竖向窗洞",
+    "非结构化学习台阶",
+    "电子讨论屏",
+    "教学楼室内深化",
+    "综合楼室内深化",
+    "生活楼室内深化",
+    "公开平立剖索引牌",
+    "南外方山高相似公开细化层",
 ]
 
 
