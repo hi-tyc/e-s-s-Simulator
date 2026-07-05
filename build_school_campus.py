@@ -1010,6 +1010,62 @@ def make_low_carbon_science_operations():
     cube("设施索引_低碳生态科学运维", (-48, 48.6, 2.65), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_culture_arts_student_center():
+    # Cultural, media, and club spaces make the liberal-arts side read as a complete student public center.
+    arts_nodes = [
+        ("黑匣子剧场", 18.0, -17.2, MATS["panel"]),
+        ("小剧场舞台", 22.0, -17.2, MATS["wood"]),
+        ("合唱排练室", 26.0, -17.2, MATS["purple"]),
+        ("乐器库", 29.5, -17.2, MATS["wood"]),
+        ("舞蹈排练厅", 18.0, -21.2, MATS["purple"]),
+        ("美术展廊", 22.0, -21.2, MATS["orange"]),
+        ("陶艺工作室", 26.0, -21.2, MATS["stone"]),
+        ("服装道具库", 29.5, -21.2, MATS["metal"]),
+    ]
+    for name, x, y, material in arts_nodes:
+        cube(name, (x, y, 5.42), (2.9, 1.65, 0.18), material, 0.026)
+        cube(f"设施索引_{name}", (x, y, 5.72), (0.56, 0.56, 0.28), MATS["orange"], 0.02)
+    for i, x in enumerate([18.6, 19.4, 20.2, 24.8, 25.6, 26.4]):
+        cyl(f"乐器库_乐器架_{i}", (x, -16.6, 5.72), 0.12, 0.68, MATS["metal"], vertices=12)
+    for i, x in enumerate([20.6, 22.0, 23.4]):
+        cube(f"美术展廊_展墙_{i}", (x, -20.45, 5.72), (0.9, 0.08, 0.58), MATS["white"], 0.01)
+
+    media_nodes = [
+        ("校园广播站", -7.5, -20.3, MATS["screen"]),
+        ("电视台演播室", -4.5, -20.3, MATS["screen"]),
+        ("录音棚", -1.5, -20.3, MATS["panel"]),
+        ("融媒体剪辑室", 1.5, -20.3, MATS["blue"]),
+        ("学生会办公室", 4.5, -20.3, MATS["wood"]),
+        ("社团活动室_A", -7.5, -16.5, MATS["green"]),
+        ("社团活动室_B", -4.5, -16.5, MATS["green"]),
+        ("社团活动室_C", -1.5, -16.5, MATS["green"]),
+        ("社团活动室_D", 1.5, -16.5, MATS["green"]),
+        ("校园融媒体发布屏", 4.5, -16.5, MATS["screen"]),
+    ]
+    for name, x, y, material in media_nodes:
+        cube(name, (x, y, 6.92), (2.15, 1.35, 0.16), material, 0.024)
+        cube(f"设施索引_{name}", (x, y, 7.18), (0.52, 0.52, 0.26), MATS["orange"], 0.018)
+    for i, x in enumerate([-7.9, -7.1, -4.9, -4.1]):
+        cube(f"融媒体_声光设备_{i}", (x, -19.75, 7.12), (0.36, 0.28, 0.36), MATS["metal"], 0.012)
+
+    plaza_nodes = [
+        ("学生作品展示长廊", 8, -33.5, MATS["white"]),
+        ("社团招新广场", 14, -33.5, MATS["orange"]),
+        ("校园文化墙", 20, -33.5, MATS["brick"]),
+        ("升旗礼仪广场", 0, -38.5, MATS["paving"]),
+        ("校训景观石", -6, -38.5, MATS["stone"]),
+        ("公告与活动信息屏", 6, -38.5, MATS["screen"]),
+    ]
+    for name, x, y, material in plaza_nodes:
+        cube(name, (x, y, 0.78), (4.2, 0.72, 1.25), material, 0.045)
+        cube(f"设施索引_{name}", (x, y, 0.32), (0.72, 0.72, 0.42), MATS["orange"], 0.025)
+    for i, x in enumerate([-3.6, -1.8, 0, 1.8, 3.6]):
+        cyl(f"升旗礼仪广场_旗杆_{i}", (x, -37.8, 2.2), 0.06, 4.2, MATS["metal"], vertices=12)
+    cube("文化艺术社团总览牌", (11, -41.8, 1.35), (24, 0.38, 1.9), MATS["panel"], 0.06)
+    text("文化艺术社团总览牌_文字", "文化艺术：剧场/排练/展廊/融媒体/学生会/社团/升旗礼仪", (11, -42.05, 1.42), 0.32, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_文化艺术社团中心", (11, -41.8, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1090,6 +1146,7 @@ PREVIEW_VIEWS = [
     ("16_体育健康室内外系统", (84, -56, 26), (52, -18, 4), 30),
     ("17_智慧安全消防韧性系统", (-82, -62, 25), (-24, -27, 2), 28),
     ("18_低碳生态科学运维", (-88, 72, 28), (-38, 40, 2), 30),
+    ("19_文化艺术社团公共学习", (52, -58, 24), (12, -27, 3), 30),
 ]
 
 
@@ -1162,6 +1219,7 @@ def build_scene():
     make_sports_health_detail()
     make_security_fire_resilience_detail()
     make_low_carbon_science_operations()
+    make_culture_arts_student_center()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)

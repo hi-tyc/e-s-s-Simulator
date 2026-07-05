@@ -68,8 +68,9 @@ The full campus scene includes:
 - Sports-health system: indoor basketball, volleyball, badminton, table tennis, fitness, dance/yoga, body-test zone, retractable stand, scoreboard, sports AED/medical point, outdoor volleyball/tennis/fitness/calisthenics zones, PE office, equipment issue, injury treatment, and night-running lights.
 - Safety-resilience layer: perimeter intrusion detection, visitor/vehicle verification, patrol checkpoints, fire alarm call points, smoke detectors, emergency lighting, fire shutters, alarm/security linkage panels, emergency supplies, shelter tents, satellite communications, emergency wireless base station, UPS, battery storage, microgrid switchgear, emergency water purification, and command center.
 - Low-carbon science operations: PV inverters, combiner boxes, carbon/energy dashboard, submetering, EV and school-bus charging, rainwater reuse, reclaimed-water treatment, permeable paving sample, smart irrigation, soil moisture, water quality, biodiversity plot, insect hotel, bird observation, rooftop greening, heat-island/noise monitoring, microclimate tower, and operations digital twin board.
+- Culture/arts/student center: black-box theater, small stage, choir and dance rehearsal, instrument and costume storage, gallery, ceramics studio, campus radio, TV studio, recording room, media editing, student union, club rooms, media release screen, display corridor, club fair plaza, culture wall, flag ceremony court, motto stone, and activity information screen.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 18 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 19 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 

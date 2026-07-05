@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 18
+EXPECTED_PREVIEW_COUNT = 19
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -268,6 +268,29 @@ REQUIRED_KEYWORDS = [
     "微气候观测塔",
     "科学运维数字孪生看板",
     "低碳生态科学运维",
+    "黑匣子剧场",
+    "小剧场舞台",
+    "合唱排练室",
+    "乐器库",
+    "舞蹈排练厅",
+    "美术展廊",
+    "陶艺工作室",
+    "服装道具库",
+    "校园广播站",
+    "电视台演播室",
+    "录音棚",
+    "融媒体剪辑室",
+    "学生会办公室",
+    "社团活动室",
+    "校园融媒体发布屏",
+    "学生作品展示长廊",
+    "社团招新广场",
+    "校园文化墙",
+    "升旗礼仪广场",
+    "校训景观石",
+    "公告与活动信息屏",
+    "文化艺术社团总览牌",
+    "文化艺术社团中心",
 ]
 
 
