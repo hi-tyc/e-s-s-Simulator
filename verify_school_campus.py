@@ -9,6 +9,8 @@ except ImportError as exc:
 
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
+PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
+EXPECTED_PREVIEW_COUNT = 13
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -124,6 +126,27 @@ REQUIRED_KEYWORDS = [
     "生态课程湿地",
     "劳动教育菜园",
     "校园温室",
+    "坐标网格",
+    "指北针",
+    "比例尺",
+    "建筑编号",
+    "楼层功能牌",
+    "电子沙盘图层控制台",
+    "电子沙盘图层_消防疏散",
+    "电子沙盘图层_安防覆盖",
+    "电子沙盘图层_网络拓扑",
+    "电子沙盘图层_能源水务",
+    "访客动线",
+    "学生动线",
+    "后勤动线",
+    "无障碍连续动线",
+    "消防登高面",
+    "消防疏散总图",
+    "安防覆盖总图",
+    "网络拓扑总图",
+    "能耗水务总图",
+    "CCTV覆盖扇区",
+    "地图索引图层控制",
 ]
 
 
@@ -138,6 +161,18 @@ def main():
         if count == 0:
             missing.append(keyword)
     print(f"OBJECT_COUNT: {len(names)}")
+    preview_files = []
+    contact_sheet = os.path.join(PREVIEW_DIR, "00_校园总览拼图.png")
+    if os.path.isdir(PREVIEW_DIR):
+        preview_files = sorted(
+            f for f in os.listdir(PREVIEW_DIR)
+            if f.endswith(".png") and f[:2].isdigit() and f != "00_校园总览拼图.png"
+        )
+    print(f"PREVIEW_COUNT: {len(preview_files)}")
+    if len(preview_files) < EXPECTED_PREVIEW_COUNT:
+        missing.append(f"preview images >= {EXPECTED_PREVIEW_COUNT}")
+    if not os.path.exists(contact_sheet) or os.path.getsize(contact_sheet) == 0:
+        missing.append("contact sheet")
     if missing:
         print("MISSING: " + ", ".join(missing))
         return 1

@@ -590,6 +590,92 @@ def make_service_and_safety():
         cube(f"smart light pole lamp {i}", (x, -14.5, 4.35), (1.0, 0.18, 0.18), MATS["light"], 0.04)
 
 
+def make_map_index_and_system_layers():
+    # Survey-style map aids: coordinates, north arrow, scale bar, building IDs, and layer controls.
+    for i, x in enumerate(range(-70, 71, 10)):
+        cube(f"坐标网格_X{i}", (x, 0, 0.155), (0.045, 108, 0.025), MATS["white"], 0.002)
+        text(f"坐标网格_X{i}_标注", f"X{x:+03d}", (x, -53.2, 0.28), 0.28, MATS["white"])
+    for i, y in enumerate(range(-50, 51, 10)):
+        cube(f"坐标网格_Y{i}", (0, y, 0.16), (148, 0.045, 0.025), MATS["white"], 0.002)
+        text(f"坐标网格_Y{i}_标注", f"Y{y:+03d}", (-72.2, y, 0.28), 0.28, MATS["white"])
+    cube("指北针_底座", (68, 49, 0.22), (4.5, 4.5, 0.08), MATS["panel"], 0.05)
+    cyl("指北针_北向箭头", (68, 49.6, 0.42), 0.62, 0.12, MATS["red"], vertices=3, rot=(0, 0, 0))
+    text("指北针_N", "N", (68, 51.5, 0.52), 0.7, MATS["white"])
+    cube("比例尺_50m", (55, 49.2, 0.24), (8.0, 0.24, 0.08), MATS["white"], 0.01)
+    cube("比例尺_25m分段", (53, 49.2, 0.3), (4.0, 0.28, 0.1), MATS["panel"], 0.01)
+    text("比例尺_文字", "比例尺 0-50m", (55, 50.0, 0.34), 0.35, MATS["white"])
+
+    building_ids = [
+        ("建筑编号_B01_图书行政", 0, -21, "B01 图书行政"),
+        ("建筑编号_B02_STEM", -23, -24, "B02 STEM"),
+        ("建筑编号_B03_博雅中心", 23, -24, "B03 博雅"),
+        ("建筑编号_T01_初中楼", -38, 4, "T01 初中"),
+        ("建筑编号_T02_高中楼", -12, 12, "T02 高中"),
+        ("建筑编号_T03_国际部", 14, 12, "T03 国际"),
+        ("建筑编号_T04_共享教室", 40, 4, "T04 共享"),
+        ("建筑编号_O01_科技运维", -48, -21, "O01 运维"),
+        ("建筑编号_S01_体育馆", 55, 11, "S01 体育"),
+        ("建筑编号_L01_食堂", 30, 31, "L01 食堂"),
+        ("建筑编号_L02_宿舍", 54, 31, "L02 宿舍"),
+        ("建筑编号_M01_医务心理", 12, 32, "M01 医务"),
+    ]
+    for name, x, y, label in building_ids:
+        cube(name, (x - 4.2, y + 4.2, 4.95), (2.6, 0.18, 0.55), MATS["panel"], 0.025)
+        text(f"{name}_文字", label, (x - 4.2, y + 4.08, 5.0), 0.25, MATS["light"], rot=(math.radians(90), 0, 0))
+
+    floor_cards = [
+        ("楼层功能牌_教学楼", -24, 20, "1F公共/2F普通教室/3F实验与选修"),
+        ("楼层功能牌_科技楼", -60, -2, "微机室/服务器/配电/监控"),
+        ("楼层功能牌_生活组团", 46, 43, "食堂/宿舍/洗衣/医务心理"),
+        ("楼层功能牌_体育区", 60, -42, "室外操场/体育馆/更衣淋浴"),
+    ]
+    for name, x, y, body in floor_cards:
+        cube(name, (x, y, 1.2), (7.5, 0.28, 1.6), MATS["panel"], 0.05)
+        text(f"{name}_文字", body, (x, y - 0.18, 1.35), 0.23, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    layer_panel_items = [
+        ("电子沙盘图层_建筑", MATS["brick"]),
+        ("电子沙盘图层_消防疏散", MATS["red"]),
+        ("电子沙盘图层_安防覆盖", MATS["screen"]),
+        ("电子沙盘图层_网络拓扑", MATS["blue"]),
+        ("电子沙盘图层_能源水务", MATS["yellow"]),
+        ("电子沙盘图层_日夜应急", MATS["light"]),
+    ]
+    cube("电子沙盘图层控制台", (-65, 51.4, 1.15), (18, 0.5, 2.4), MATS["panel"], 0.06)
+    for i, (name, material) in enumerate(layer_panel_items):
+        z = 2.05 - i * 0.32
+        cube(name, (-71.0, 51.08, z), (0.42, 0.1, 0.18), material, 0.02)
+        text(f"{name}_文字", name.replace("电子沙盘图层_", ""), (-65.5, 51.02, z), 0.22, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    route_specs = [
+        ("访客动线", -8, -51, 0, -21, MATS["orange"]),
+        ("学生动线", 0, -47, -12, 12, MATS["blue"]),
+        ("后勤动线", -68, 34, 67, 34, MATS["green"]),
+        ("无障碍连续动线", 9, -50, 13, 32, MATS["white"]),
+        ("消防登高面", 45, -43, 55, 18, MATS["red"]),
+    ]
+    for name, x1, y1, x2, y2, material in route_specs:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(f"{name}_路线", ((x1 + x2) / 2, (y1 + y2) / 2, 0.34), (length, 0.18, 0.05), material, 0.01, rot_z=angle)
+        cyl(f"{name}_箭头", (x2, y2, 0.39), 0.38, 0.08, material, vertices=3, rot=(0, 0, angle - math.pi / 2))
+
+    system_boards = [
+        ("消防疏散总图", -67, -42, MATS["red"]),
+        ("安防覆盖总图", -67, -37, MATS["screen"]),
+        ("网络拓扑总图", -67, -32, MATS["blue"]),
+        ("能耗水务总图", -67, -27, MATS["yellow"]),
+    ]
+    for name, x, y, material in system_boards:
+        cube(name, (x, y, 1.15), (6.4, 0.34, 1.45), MATS["panel"], 0.05)
+        cube(f"{name}_彩色标题", (x - 2.25, y - 0.22, 1.55), (1.0, 0.08, 0.3), material, 0.01)
+        text(f"{name}_文字", name, (x, y - 0.25, 1.12), 0.34, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    for i, (x, y) in enumerate([(-60, -38), (-30, 18), (0, -20), (30, 8), (60, -43), (58, 24), (-5, -52), (5, -52)]):
+        cyl(f"CCTV覆盖扇区_{i}", (x, y, 0.21), 2.2, 0.035, MATS["glass"], vertices=32)
+    cube("设施索引_地图索引图层控制", (-65, 51.4, 2.62), (1.0, 1.0, 0.4), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -664,6 +750,7 @@ PREVIEW_VIEWS = [
     ("10_后勤边界和服务节点", (88, 74, 34), (48, 30, 2), 30),
     ("11_图书体育公共服务", (64, -6, 28), (22, -14, 5), 30),
     ("12_规划行政实验安全运动", (-76, 62, 31), (-20, 12, 3), 28),
+    ("13_地图索引图层控制", (-88, 32, 24), (-48, 24, 2), 30),
 ]
 
 
@@ -730,6 +817,7 @@ def build_scene():
     make_daily_school_services()
     make_public_amenities_and_special_interiors()
     make_planning_admin_and_learning_landscape()
+    make_map_index_and_system_layers()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)

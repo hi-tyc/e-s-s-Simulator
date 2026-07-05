@@ -62,6 +62,9 @@ The full campus scene includes:
 - Outdoor learning landscape: amphitheater, reading garden, ecological wetland, labor-education garden, and greenhouse.
 - Sports support rooms: changing room, shower room, equipment room, referee/medical point.
 - Wayfinding screens, AED boxes, emergency phones, drinking water points, lockers, electronic class boards, visitor terminal, and charging station.
+- Map delivery aids: coordinate grid, north arrow, scale bar, building ID tags, floor-function boards, route layers, system overview boards, CCTV coverage disks, and electronic layer-control console.
+
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 13 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 
