@@ -1362,6 +1362,88 @@ def make_language_international_exchange_center():
     cube("设施索引_外语国际交流学习中心", (19, -11.2, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_surrounding_city_interface():
+    # Campus-to-city layer: complete the map with roads, transit, crossings, municipal handoff, and Fangshan context.
+    cube("校外城市主干路", (0, -64.0, 0.03), (156, 7.2, 0.06), MATS["road"], 0.03)
+    cube("校外慢行绿道", (0, -59.8, 0.08), (148, 2.0, 0.08), MATS["green"], 0.035)
+    cube("校外人行道_南侧", (0, -68.2, 0.08), (148, 2.2, 0.08), MATS["paving"], 0.035)
+    for x in range(-70, 71, 10):
+        cube(f"校外道路中心线_{x}", (x, -64.0, 0.12), (4.2, 0.12, 0.025), MATS["parking"], 0.004)
+    for i, x in enumerate([-10, -7.6, -5.2, -2.8, -0.4, 2.0, 4.4, 6.8, 9.2]):
+        cube(f"南门斑马线_{i}", (x, -60.9, 0.14), (1.35, 4.2, 0.026), MATS["parking"], 0.003)
+    cube("行人过街安全岛", (0, -64.0, 0.2), (7.5, 0.9, 0.26), MATS["stone"], 0.04)
+    cube("校门外减速带", (0, -62.0, 0.18), (18.0, 0.28, 0.08), MATS["yellow"], 0.01)
+
+    transit_nodes = [
+        ("公交站台_南外方山校区站", -28, -68.0, MATS["roof"]),
+        ("校车社会车辆分离标识", -42, -60.0, MATS["screen"]),
+        ("出租网约车落客区", 28, -68.0, MATS["orange"]),
+        ("地铁接驳步行导向牌", 42, -60.0, MATS["screen"]),
+        ("非机动车等候区", 54, -60.0, MATS["green"]),
+    ]
+    for name, x, y, material in transit_nodes:
+        cube(name, (x, y, 1.05), (5.4, 1.25, 1.65), material, 0.06)
+        cube(f"设施索引_{name}", (x, y, 0.35), (0.65, 0.65, 0.36), MATS["orange"], 0.02)
+    for i, x in enumerate([-31.5, -28, -24.5]):
+        cube(f"公交候车座椅_{i}", (x, -67.15, 0.55), (1.2, 0.34, 0.42), MATS["metal"], 0.025)
+    for i, x in enumerate([26, 29.5, 33]):
+        cube(f"网约车临停位_{i}", (x, -63.8, 0.16), (4.2, 1.7, 0.028), MATS["parking"], 0.004)
+
+    signal_nodes = [
+        ("校门交通信号灯_西", -12.5, -61.0, MATS["metal"]),
+        ("校门交通信号灯_东", 12.5, -61.0, MATS["metal"]),
+        ("学生过街按钮_西", -13.8, -59.4, MATS["yellow"]),
+        ("学生过街按钮_东", 13.8, -59.4, MATS["yellow"]),
+        ("校外违停抓拍摄像机", 20, -61.0, MATS["white"]),
+        ("校外交通流量雷达", -20, -61.0, MATS["screen"]),
+    ]
+    for name, x, y, material in signal_nodes:
+        cube(name, (x, y, 1.15), (0.75, 0.42, 1.55), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.36), (0.55, 0.55, 0.32), MATS["orange"], 0.018)
+
+    municipal_nodes = [
+        ("市政给水接入口", -67, -58.2, MATS["water"]),
+        ("市政电力环网柜", -61, -58.2, MATS["yellow"]),
+        ("市政通信光交箱", -55, -58.2, MATS["blue"]),
+        ("市政燃气调压箱", 61, -58.2, MATS["orange"]),
+        ("市政污水检查井", 67, -58.2, MATS["metal"]),
+        ("校外消防取水口", 72, -58.2, MATS["red"]),
+    ]
+    for name, x, y, material in municipal_nodes:
+        cube(name, (x, y, 0.8), (1.35, 0.9, 1.25), material, 0.04)
+        cyl(f"{name}_井盖", (x, y + 0.9, 0.17), 0.38, 0.06, material, vertices=24)
+        cube(f"设施索引_{name}", (x, y, 1.58), (0.55, 0.55, 0.28), MATS["orange"], 0.018)
+
+    city_handoff_routes = [
+        ("市政给水接驳线_入校", -67, -58.2, -54, 31, MATS["water"], 0.13),
+        ("市政电力接驳线_入校", -61, -58.2, -57, -9, MATS["yellow"], 0.13),
+        ("市政通信接驳线_入校", -55, -58.2, -36, -7, MATS["blue"], 0.13),
+        ("市政燃气接驳线_入校", 61, -58.2, 34, 36.4, MATS["orange"], 0.13),
+        ("市政污水外排线_出校", 54, 31, 67, -58.2, MATS["metal"], 0.13),
+    ]
+    for name, x1, y1, x2, y2, material, width in city_handoff_routes:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, -0.09), (length, width, 0.07), material, 0.005, rot_z=angle)
+
+    for i, (x, y, s) in enumerate([(-66, 49, 1.4), (-54, 51, 1.2), (54, 50, 1.35), (66, 48, 1.15)]):
+        add_tree(x, y, s, f"方山生态缓冲林_{i}")
+    cube("方山背景观景平台", (-54, 45.8, 0.2), (12.0, 2.8, 0.18), MATS["paving"], 0.04)
+    cube("方山背景说明牌", (-54, 44.0, 1.15), (7.5, 0.28, 1.55), MATS["panel"], 0.05)
+    text("方山背景说明牌_文字", "方山背景：山水校园、红砖院落、城市慢行绿道衔接", (-54, 43.8, 1.22), 0.27, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    cube("校外周边市政界面总览牌", (0, -70.2, 1.35), (36, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "校外周边市政界面总览牌_文字",
+        "校外界面：城市道路/公交站/过街安全/慢行绿道/市政水电气通信/方山生态背景",
+        (0, -70.45, 1.42),
+        0.31,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_校外周边市政界面", (0, -70.2, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1447,6 +1529,7 @@ PREVIEW_VIEWS = [
     ("21_机电管线楼宇运维", (72, 62, 34), (0, 6, 1), 28),
     ("22_校园治理运行中枢", (-76, -34, 24), (-25, -9, 2), 28),
     ("23_外语国际交流学习中心", (54, -45, 21), (18, -18, 2), 30),
+    ("24_校外周边市政界面", (48, -92, 24), (0, -61, 1), 28),
 ]
 
 
@@ -1524,6 +1607,7 @@ def build_scene():
     make_mep_utility_operations()
     make_campus_governance_operations()
     make_language_international_exchange_center()
+    make_surrounding_city_interface()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
