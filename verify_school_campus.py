@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 28
+EXPECTED_PREVIEW_COUNT = 30
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -512,6 +512,30 @@ REQUIRED_KEYWORDS = [
     "逃生指示",
     "四层剖面主场景总览牌",
     "游戏主教学楼_四层详细室内",
+    "可通行导航节点",
+    "可通行走廊路径",
+    "交互门洞",
+    "交互提示牌",
+    "碰撞边界",
+    "垂直连接线",
+    "玩家出生点",
+    "任务点",
+    "存档点",
+    "检查点",
+    "游戏主教学楼_导航交互总览牌",
+    "游戏主教学楼_导航交互",
+    "南外方山公开资料复刻",
+    "公开资料来源_ArchDaily",
+    "公开资料来源_GLA官网",
+    "公开资料来源_建筑学院",
+    "南北礼仪轴",
+    "东西学习街轴",
+    "中心水景圆庭",
+    "半敞开环形入口艺苑控制线",
+    "暗红面砖连续檐廊",
+    "共享学习街玻璃面",
+    "公开特征_暗红色面砖主材",
+    "公开特征_院落化校园空间",
 ]
 
 

@@ -9,6 +9,7 @@ from mathutils import Vector
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
+SKIP_PREVIEWS = os.environ.get("SCHOOL_SKIP_PREVIEWS", "").lower() in {"1", "true", "yes"}
 
 
 MATS = {}
@@ -206,6 +207,72 @@ def make_academic_core():
         cyl(f"teaching courtyard {idx} inner courtyard", (x, y, 0.1), 4.2, 0.06, MATS["paving"], vertices=48)
         add_tree(x - 2.2, y + 1.2, 0.75, f"{label} courtyard tree a")
         add_tree(x + 2.2, y - 1.0, 0.75, f"{label} courtyard tree b")
+
+
+def make_fangshan_public_reference_reconstruction():
+    # Public-source reconstruction anchors from GLA/ArchDaily/ArchCollege descriptions and plan imagery.
+    cube("南外方山公开资料复刻_学苑方城总平基准框", (0, -2, 0.155), (126, 86, 0.03), MATS["stone"])
+    cube("南外方山公开资料复刻_南北礼仪轴", (0, -2, 0.24), (3.0, 88, 0.055), MATS["orange"])
+    cube("南外方山公开资料复刻_东西学习街轴", (0, -8, 0.255), (108, 2.4, 0.055), MATS["blue"])
+    cube("南外方山公开资料复刻_生活运动分离界面", (43, 3, 0.27), (2.0, 76, 0.055), MATS["green"])
+    cyl("南外方山公开资料复刻_中心水景圆庭", (0, -2, 0.31), 10.2, 0.06, MATS["water"], vertices=32)
+    cyl("南外方山公开资料复刻_中心水景环形步道", (0, -2, 0.335), 12.0, 0.035, MATS["paving"], vertices=32)
+
+    text("南外方山公开资料复刻_总平概念文字", "公开资料复刻：学苑方城 / 南北双轴 / 院落教学 / 生活运动分离 / 红砖暖白", (0, 42.2, 0.35), 0.72, MATS["white"])
+
+    source_panels = [
+        ("公开资料来源_ArchDaily_南外方山_GLA_项目页", -56, -36, "ArchDaily：南京外国语学校方山校区 / GLA建筑设计，2018，164406㎡"),
+        ("公开资料来源_GLA官网_南外方山_项目页", -56, -33.4, "GLA官网：弘景大道与方山景区之间，用地233646㎡，建筑226859㎡，容积率0.84"),
+        ("公开资料来源_建筑学院_南外方山_转载图文", -56, -30.8, "建筑学院：西方公学尺度、当代多元文化、院落化校园、红砖城市展示面"),
+    ]
+    for name, x, y, label in source_panels:
+        cube(name, (x, y, 1.15), (22.0, 0.34, 1.5), MATS["panel"], 0.015)
+        text(f"{name}_文字", label, (x, y - 0.22, 1.18), 0.23, MATS["white"], rot=(math.radians(90), 0, 0))
+        cube(f"设施索引_{name}", (x - 11.8, y, 0.42), (0.85, 0.85, 0.48), MATS["orange"], 0.01)
+
+    campus_bands = [
+        ("公开总平_入口共享学苑带", 0, -37, 47, 14, MATS["orange"], "入口共享学苑"),
+        ("公开总平_小学初中组团带", -37, 4, 23, 19, MATS["blue"], "小初组团院落"),
+        ("公开总平_高中部组团带", -12, 12, 23, 19, MATS["purple"], "高中组团院落"),
+        ("公开总平_国际部组团带", 14, 12, 23, 19, MATS["green"], "国际部组团院落"),
+        ("公开总平_共享教室组团带", 40, 4, 23, 19, MATS["yellow"], "共享教室组团"),
+        ("公开总平_生活住宿餐饮带", 46, 32, 38, 19, MATS["green"], "生活后勤组团"),
+        ("公开总平_运动活力带", 50, -30, 48, 24, MATS["red"], "运动活力组团"),
+    ]
+    for name, x, y, w, d, material, label in campus_bands:
+        cube(name, (x, y, 0.38), (w, d, 0.04), material)
+        text(f"{name}_功能文字", label, (x, y, 0.48), 0.34, MATS["white"])
+
+    ring_center = (0, -45)
+    for i, angle in enumerate(range(198, 343, 16)):
+        rad = math.radians(angle)
+        x = ring_center[0] + math.cos(rad) * 26.8
+        y = ring_center[1] + math.sin(rad) * 26.8
+        cube(f"公开平面图_半敞开环形入口艺苑控制线_{i}", (x, y, 0.44), (1.45, 0.08, 0.12), MATS["yellow"], rot_z=rad + math.pi / 2)
+
+    learning_street_nodes = [(-38, 4), (-12, 12), (14, 12), (40, 4)]
+    for idx, (x, y) in enumerate(learning_street_nodes):
+        cube(f"公开资料复刻_院落组团_{idx}_暗红面砖连续檐廊", (x, y - 7.0, 1.65), (16.8, 0.52, 1.35), MATS["brick"], 0.01)
+        cube(f"公开资料复刻_院落组团_{idx}_暖白石材门套", (x, y - 7.32, 1.35), (5.2, 0.22, 1.95), MATS["stone"], 0.01)
+        cube(f"公开资料复刻_院落组团_{idx}_共享学习街玻璃面", (x, y + 6.28, 1.85), (15.2, 0.18, 2.4), MATS["glass"])
+        for bay in range(5):
+            bx = x - 6.4 + bay * 3.2
+            cube(f"公开资料复刻_院落组团_{idx}_红砖竖向窗间墙_{bay}", (bx, y - 6.95, 2.7), (0.34, 0.42, 3.1), MATS["brick"])
+            cube(f"公开资料复刻_院落组团_{idx}_竖向绿化钢索_{bay}", (bx + 0.55, y - 7.24, 2.45), (0.055, 0.055, 2.8), MATS["green"])
+        cyl(f"公开资料复刻_院落组团_{idx}_内院树池", (x, y, 0.52), 4.8, 0.18, MATS["paving"], vertices=24)
+        cyl(f"公开资料复刻_院落组团_{idx}_内院草坪", (x, y, 0.64), 3.55, 0.12, MATS["grass"], vertices=24)
+
+    source_features = [
+        ("公开特征_暗红色面砖主材", -64, 12, MATS["brick"]),
+        ("公开特征_暖白色石材基座", -64, 15, MATS["stone"]),
+        ("公开特征_院落化校园空间", -64, 18, MATS["green"]),
+        ("公开特征_第三代学校共享学习空间", -64, 21, MATS["screen"]),
+        ("公开特征_山水校园方山背景", -64, 24, MATS["mountain"]),
+    ]
+    for name, x, y, material in source_features:
+        cube(name, (x, y, 1.05), (6.8, 0.38, 1.25), material, 0.01)
+        text(f"{name}_说明文字", name.replace("公开特征_", ""), (x, y - 0.25, 1.1), 0.24, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_南外方山公开资料复刻层", (-64, 18, 2.05), (1.0, 1.0, 0.45), MATS["orange"], 0.01)
 
 
 def make_room_equipment(x, y, name):
@@ -1745,6 +1812,78 @@ def make_game_main_teaching_building_detail():
     cube("设施索引_游戏主教学楼_四层详细室内", (cx, cy + 8.0, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_game_navigation_interaction_markers():
+    # Game-readiness layer for the main teaching building: spawn points, door markers, route volumes, and quest anchors.
+    cx, cy = -12, 12
+    floor_z = [7.22, 8.97, 10.72, 12.47]
+    for floor_idx, z in enumerate(floor_z):
+        level = floor_idx + 1
+        route_nodes = [(-19.2, cy, "西楼梯"), (-16.0, cy, "走廊西段"), (-12.0, cy, "走廊中段"), (-8.0, cy, "走廊东段"), (-5.7, cy, "电梯厅")]
+        for node_idx, (x, y, label) in enumerate(route_nodes):
+            cyl(f"游戏主教学楼_{level}F_可通行导航节点_{label}", (x, y, z + 0.08), 0.22, 0.08, MATS["green"], vertices=24)
+            if node_idx:
+                prev_x, prev_y, _ = route_nodes[node_idx - 1]
+                angle = math.atan2(y - prev_y, x - prev_x)
+                length = math.hypot(x - prev_x, y - prev_y)
+                cube(f"游戏主教学楼_{level}F_可通行走廊路径_{node_idx}", ((x + prev_x) / 2, (y + prev_y) / 2, z + 0.06), (length, 0.22, 0.06), MATS["green"], 0.004, rot_z=angle)
+
+        door_specs = [
+            ("北A门洞", -5.7, cy + 1.22, MATS["yellow"]),
+            ("北B门洞", -1.7, cy + 1.22, MATS["yellow"]),
+            ("南A门洞", -5.7, cy - 1.22, MATS["yellow"]),
+            ("南B门洞", -1.7, cy - 1.22, MATS["yellow"]),
+            ("厕所门洞", cx + 7.9, cy + 2.2, MATS["water"]),
+            ("西楼梯门洞", cx - 8.2, cy - 1.18, MATS["orange"]),
+            ("东楼梯门洞", cx + 8.2, cy - 1.18, MATS["orange"]),
+            ("电梯门洞", cx + 6.3, cy - 1.18, MATS["blue"]),
+        ]
+        for name, x, y, material in door_specs:
+            cube(f"游戏主教学楼_{level}F_{name}_交互门洞", (x, y, z + 0.42), (0.82, 0.12, 0.9), material, 0.01)
+            cube(f"游戏主教学楼_{level}F_{name}_交互提示牌", (x, y, z + 1.05), (0.58, 0.06, 0.22), MATS["screen"], 0.006)
+
+        boundary_specs = [
+            ("北栏杆碰撞边界", cx, cy + 6.62, 0, 18.6),
+            ("南栏杆碰撞边界", cx, cy - 6.62, 0, 18.6),
+            ("西外墙碰撞边界", cx - 9.4, cy, math.radians(90), 13.0),
+            ("东外墙碰撞边界", cx + 9.4, cy, math.radians(90), 13.0),
+        ]
+        for name, x, y, rot, length in boundary_specs:
+            cube(f"游戏主教学楼_{level}F_{name}", (x, y, z + 0.38), (length, 0.08, 0.76), MATS["red"], 0.004, rot_z=rot)
+
+    vertical_links = [
+        ("西楼梯垂直连接线", cx - 8.2, cy),
+        ("东楼梯垂直连接线", cx + 8.2, cy),
+        ("电梯垂直连接线", cx + 6.3, cy),
+    ]
+    for name, x, y in vertical_links:
+        cyl(f"游戏主教学楼_{name}", (x, y, 9.7), 0.12, 5.6, MATS["blue"], vertices=16)
+
+    gameplay_points = [
+        ("玩家出生点_一层门厅", cx - 7.0, cy - 0.25, floor_z[0] + 0.25, MATS["green"]),
+        ("任务点_领取课表", cx - 5.7, cy + 4.0, floor_z[0] + 0.3, MATS["screen"]),
+        ("任务点_寻找储物柜钥匙", cx - 16.0, cy - 0.82, floor_z[1] + 0.3, MATS["orange"]),
+        ("任务点_进入二层标准教室", cx - 5.7, cy + 2.0, floor_z[1] + 0.3, MATS["yellow"]),
+        ("任务点_三层导师办公室", cx - 5.7, cy - 4.0, floor_z[2] + 0.3, MATS["purple"]),
+        ("任务点_四层录播室", cx - 5.7, cy - 4.0, floor_z[3] + 0.3, MATS["screen"]),
+        ("存档点_电梯厅", cx + 6.3, cy + 0.65, floor_z[0] + 0.3, MATS["blue"]),
+        ("检查点_厕所洗手台", cx + 7.9, cy + 2.75, floor_z[1] + 0.3, MATS["water"]),
+    ]
+    for name, x, y, z, material in gameplay_points:
+        cyl(f"游戏主教学楼_{name}", (x, y, z), 0.32, 0.16, material, vertices=32, bevel=True)
+        cube(f"游戏主教学楼_{name}_浮标", (x, y, z + 0.55), (0.42, 0.42, 0.42), material, 0.04)
+
+    cube("游戏主教学楼_导航交互总览牌", (cx - 28, cy + 4, 1.35), (25, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "游戏主教学楼_导航交互总览牌_文字",
+        "游戏可用：出生点/任务点/交互门洞/可通行走廊路径/楼梯电梯垂直连接/碰撞边界/存档检查点",
+        (cx - 28, cy + 3.75, 1.42),
+        0.28,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_游戏主教学楼_导航交互", (cx - 28, cy + 4, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1835,6 +1974,8 @@ PREVIEW_VIEWS = [
     ("26_无线网络边缘计算", (-82, -42, 24), (-30, -14, 2), 28),
     ("27_全建筑室内详图覆盖", (76, 48, 30), (16, 12, 5), 30),
     ("28_游戏主教学楼四层室内", (32, 42, 22), (-12, 12, 9), 34),
+    ("29_游戏主教学楼导航交互", (-46, 32, 18), (-12, 12, 8), 40),
+    ("30_南外方山公开资料复刻层", (82, -82, 54), (0, -4, 1), 30),
 ]
 
 
@@ -1843,12 +1984,11 @@ def render_previews():
     for f in os.listdir(PREVIEW_DIR):
         if f.endswith(".png"):
             os.remove(os.path.join(PREVIEW_DIR, f))
-    try:
-        bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except Exception:
-        bpy.context.scene.render.engine = "BLENDER_WORKBENCH"
-    bpy.context.scene.render.resolution_x = 1400
-    bpy.context.scene.render.resolution_y = 900
+    bpy.context.scene.render.engine = "BLENDER_WORKBENCH"
+    bpy.context.scene.display.shading.light = "STUDIO"
+    bpy.context.scene.display.shading.color_type = "MATERIAL"
+    bpy.context.scene.render.resolution_x = 1100
+    bpy.context.scene.render.resolution_y = 720
     for name, loc, target, lens in PREVIEW_VIEWS:
         cam_data = bpy.data.cameras.new(f"preview camera {name}")
         cam = bpy.data.objects.new(f"preview camera {name}", cam_data)
@@ -1891,6 +2031,7 @@ def build_scene():
     make_campus_base()
     make_gate_and_security()
     make_academic_core()
+    make_fangshan_public_reference_reconstruction()
     make_technology_building()
     make_science_and_innovation_spaces()
     make_sports_and_living()
@@ -1917,10 +2058,12 @@ def build_scene():
     make_wireless_edge_network_operations()
     make_complete_building_interiors()
     make_game_main_teaching_building_detail()
+    make_game_navigation_interaction_markers()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
-    render_previews()
+    if not SKIP_PREVIEWS:
+        render_previews()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
 
 
