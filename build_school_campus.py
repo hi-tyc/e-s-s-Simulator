@@ -838,6 +838,64 @@ def make_living_logistics_detail():
     cube("设施索引_生活后勤完整运营", (55, 45.6, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_sports_health_detail():
+    # Indoor sports hall as a full PE/health facility rather than a single court.
+    indoor_z = 8.05
+    indoor_nodes = [
+        ("体育馆_篮球主场", 55, 11, MATS["wood"]),
+        ("体育馆_排球场", 49, 10.5, MATS["orange"]),
+        ("体育馆_羽毛球场A", 59.5, 8.0, MATS["green"]),
+        ("体育馆_羽毛球场B", 59.5, 13.8, MATS["green"]),
+        ("体育馆_乒乓球区", 47.0, 6.0, MATS["blue"]),
+        ("体育馆_体测区", 63.0, 6.0, MATS["yellow"]),
+        ("体育馆_健身房", 47.0, 16.0, MATS["metal"]),
+        ("体育馆_瑜伽舞蹈房", 63.0, 16.0, MATS["purple"]),
+    ]
+    for name, x, y, material in indoor_nodes:
+        cube(name, (x, y, indoor_z), (4.8, 2.3, 0.12), material, 0.025)
+        cube(f"设施索引_{name}", (x, y, indoor_z + 0.28), (0.58, 0.58, 0.24), MATS["orange"], 0.018)
+    for i, y in enumerate([8.0, 13.8]):
+        cube(f"体育馆_羽毛球网_{i}", (59.5, y, indoor_z + 0.42), (4.2, 0.06, 0.55), MATS["metal"], 0.008)
+    cube("体育馆_排球网", (49, 10.5, indoor_z + 0.42), (4.2, 0.06, 0.58), MATS["metal"], 0.008)
+    for i, x in enumerate([46.0, 47.4, 48.8]):
+        cube(f"体育馆_乒乓球台_{i}", (x, 6.0, indoor_z + 0.32), (0.95, 0.55, 0.12), MATS["blue"], 0.012)
+    for i, x in enumerate([45.9, 47.0, 48.1]):
+        cyl(f"体育馆_健身器械_{i}", (x, 16.0, indoor_z + 0.45), 0.18, 0.7, MATS["metal"], vertices=16)
+    for i, x in enumerate([61.5, 62.6, 63.7, 64.8]):
+        cube(f"体育馆_体测仪_{i}", (x, 6.0, indoor_z + 0.48), (0.38, 0.32, 0.72), MATS["screen"], 0.018)
+    cube("体育馆_可伸缩看台", (55, 18.5, indoor_z + 0.58), (18.5, 1.4, 1.0), MATS["stone"], 0.04)
+    for i in range(4):
+        cube(f"体育馆_看台座席_{i}", (55, 18.0 + i * 0.32, indoor_z + 0.9 + i * 0.08), (17.4, 0.12, 0.12), MATS["wood"], 0.006)
+    cube("体育馆_赛事计分屏", (43.2, 11, indoor_z + 2.1), (0.12, 4.2, 1.6), MATS["screen"], 0.02)
+    cube("体育馆_急救AED运动医务点", (44.0, 18.6, indoor_z + 0.55), (1.2, 0.62, 0.85), MATS["red"], 0.03)
+    cube("体育馆_饮水补给点", (66.2, 18.6, indoor_z + 0.55), (1.2, 0.62, 0.85), MATS["blue"], 0.03)
+    cube("体育馆_运动数据采集屏", (55, 4.0, indoor_z + 1.1), (5.5, 0.12, 1.1), MATS["screen"], 0.02)
+
+    # Outdoor sports completeness: additional courts, fitness trail, and PE storage.
+    outdoor_nodes = [
+        ("室外排球场", 17, -18, MATS["orange"]),
+        ("室外网球场", 28, -18, MATS["green"]),
+        ("室外体能训练区", 39, -18, MATS["metal"]),
+        ("单双杠训练区", 55, -43, MATS["blue"]),
+        ("体育教师办公室", 64, -40, MATS["wood"]),
+        ("运动器材发放点", 67, -40, MATS["orange"]),
+        ("运动损伤处理点", 70, -40, MATS["red"]),
+    ]
+    for name, x, y, material in outdoor_nodes:
+        cube(name, (x, y, 0.22), (7.2 if "场" in name else 2.4, 4.2 if "场" in name else 1.5, 0.12 if "场" in name else 1.1), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.62), (0.78, 0.78, 0.42), MATS["orange"], 0.025)
+    for i, x in enumerate([35.8, 38.0, 40.2, 42.4]):
+        cyl(f"室外体能训练器械_{i}", (x, -18, 0.78), 0.08, 1.3, MATS["metal"], vertices=12)
+    for i, x in enumerate([52.8, 54.2, 55.6, 57.0]):
+        cyl(f"单双杠立柱_{i}", (x, -43, 0.9), 0.07, 1.6, MATS["metal"], vertices=12)
+    for i, (x, y) in enumerate([(14, -33), (22, -45), (38, -45), (60, -34), (63, -22)]):
+        cube(f"夜跑步道照明_{i}", (x, y, 1.6), (0.16, 0.16, 3.0), MATS["metal"], 0.01)
+        cube(f"夜跑步道灯头_{i}", (x, y + 0.28, 3.15), (0.62, 0.18, 0.16), MATS["light"], 0.02)
+    cube("运动健康总览牌", (61, -48.5, 1.25), (18, 0.38, 1.8), MATS["panel"], 0.06)
+    text("运动健康总览牌_文字", "体育健康：室内多功能场馆 / 室外田赛球类 / 体测健身 / AED与运动医务", (61, -48.75, 1.35), 0.32, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_体育健康完整系统", (61, -48.5, 2.35), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -915,6 +973,7 @@ PREVIEW_VIEWS = [
     ("13_地图索引图层控制", (-88, 32, 24), (-48, 24, 2), 30),
     ("14_教学楼容量与智慧教室", (66, 34, 24), (30, 12, 6), 34),
     ("15_生活后勤食堂宿舍运营", (84, 58, 24), (52, 35, 4), 30),
+    ("16_体育健康室内外系统", (84, -56, 26), (52, -18, 4), 30),
 ]
 
 
@@ -984,6 +1043,7 @@ def build_scene():
     make_map_index_and_system_layers()
     make_teaching_detail_and_capacity_schedule()
     make_living_logistics_detail()
+    make_sports_health_detail()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)

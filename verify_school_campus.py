@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 15
+EXPECTED_PREVIEW_COUNT = 16
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -200,6 +200,27 @@ REQUIRED_KEYWORDS = [
     "油烟净化设备",
     "生活后勤洁污分流总图",
     "生活后勤完整运营",
+    "体育馆_篮球主场",
+    "体育馆_排球场",
+    "体育馆_羽毛球场A",
+    "体育馆_乒乓球区",
+    "体育馆_体测区",
+    "体育馆_健身房",
+    "体育馆_瑜伽舞蹈房",
+    "体育馆_可伸缩看台",
+    "体育馆_赛事计分屏",
+    "体育馆_急救AED运动医务点",
+    "体育馆_运动数据采集屏",
+    "室外排球场",
+    "室外网球场",
+    "室外体能训练区",
+    "单双杠训练区",
+    "体育教师办公室",
+    "运动器材发放点",
+    "运动损伤处理点",
+    "夜跑步道照明",
+    "运动健康总览牌",
+    "体育健康完整系统",
 ]
 
 
