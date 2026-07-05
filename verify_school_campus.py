@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 31
+EXPECTED_PREVIEW_COUNT = 32
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -554,6 +554,24 @@ REQUIRED_KEYWORDS = [
     "生活楼室内深化",
     "公开平立剖索引牌",
     "南外方山高相似公开细化层",
+    "南外方山公开课程庭院细节",
+    "庭院拱",
+    "A-Level课程教室",
+    "AP课程教室",
+    "OSSD课程教室",
+    "国际升学指导中心",
+    "英语戏剧黑盒",
+    "跨文化项目展示墙",
+    "美育中心",
+    "科学竞赛实验室",
+    "宿舍学院制",
+    "学院客厅",
+    "小学部_美育活动课程",
+    "初中部_科创拓展课程",
+    "高中部_竞赛拔尖课程",
+    "国际高中部_国际课程路径",
+    "公开依据索引牌",
+    "南外方山公开课程庭院细节层",
 ]
 
 

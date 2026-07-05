@@ -85,8 +85,9 @@ The full campus scene includes:
 - Gameplay navigation/interaction layer for the main teaching building: player spawn point, quest/check/save points, interactive door markers, passable corridor paths, stair/elevator vertical links, and explicit collision/boundary guide markers.
 - Fangshan public-reference reconstruction layer: visible source panels, plan-control frame, north-south and east-west axes, center water court, semi-open entrance ring control line, public-plan district bands, red-brick/warm-stone facade markers, courtyard learning clusters, shared-learning-street glass facades, and public-feature callouts.
 - Fangshan high-similarity public-detail layer: public-keyword panels for Xueyuan Fangcheng, third-generation school, public-school campus style, four school divisions, and interior deepening; elementary/middle/high/international-high division markers; south city-facing red-brick facade bands with vertical window openings; staggered roof-height cues; non-formal learning steps with discussion screens; and interior-deepening cues for teaching, comprehensive, and living buildings.
+- Fangshan public curriculum/courtyard detail layer: courtyard-arch cues, A-Level/AP/OSSD international-course rooms, international advising, English-drama and cross-cultural display spaces, arts and science-competition rooms, residential-college house lounges, and four-division curriculum map boards.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 31 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 32 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 
