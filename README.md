@@ -49,10 +49,17 @@ The full campus scene includes:
 - Toilets, elevators, stair cores, access-control nodes.
 - Campus boundary walls, ring fire lane, loading dock, waste sorting station.
 - Bus drop-off, bike parking, accessible ramp.
+- District overlays for entrance/shared, teaching quiet, sports, living/logistics, and technology operations zones.
+- Additional logistics/emergency gates, visitor parking, and staff parking.
 - Fire hydrants, evacuation routes, assembly areas, broadcast speakers.
 - Underground utility gallery with inspection manholes.
 - Weather station and air-quality sensor.
 - Library interior reading area, shelves, and self-checkout kiosk.
+- Administration cutaway with principal office, academic affairs, general affairs, finance, meeting, and archive rooms.
+- Lab safety equipment: chemical storage, hazardous waste box, fume hood, emergency shower/eyewash, and biosafety cabinet.
+- Campus HVAC/water/fire service nodes: energy station, chiller, circulation pump, fire tank, pump rooms, IDF closets, BAS, day/night mode, and lighting circuit control.
+- Athletics support: spectator stand, rostrum, electronic scoreboard, long-jump pit, and shot-put area.
+- Outdoor learning landscape: amphitheater, reading garden, ecological wetland, labor-education garden, and greenhouse.
 - Sports support rooms: changing room, shower room, equipment room, referee/medical point.
 - Wayfinding screens, AED boxes, emergency phones, drinking water points, lockers, electronic class boards, visitor terminal, and charging station.
 
