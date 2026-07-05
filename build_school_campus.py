@@ -59,6 +59,7 @@ def init_materials():
             "solar": mat("blue black solar glass", (0.01, 0.035, 0.08, 1), 0.18, emission=(0.0, 0.04, 0.08, 1), strength=0.15),
             "parking": mat("parking line white", (0.93, 0.93, 0.86, 1), 0.55),
             "wetland": mat("rain garden wetland", (0.08, 0.28, 0.2, 1), 0.8),
+            "wood": mat("warm indoor wood", (0.55, 0.34, 0.16, 1), 0.52),
             "tree": mat("campus tree canopy", (0.04, 0.34, 0.12, 1), 0.7),
             "trunk": mat("tree trunk bark", (0.38, 0.22, 0.1, 1), 0.8),
             "light": mat("warm architectural light", (1, 0.92, 0.7, 1), 0.2, emission=(1, 0.82, 0.46, 1), strength=1.0),
@@ -463,6 +464,100 @@ def make_public_amenities_and_special_interiors():
         cube(f"设施索引_{name}", (x, y, 0.32), (0.8, 0.8, 0.42), MATS["orange"], 0.03)
 
 
+def make_planning_admin_and_learning_landscape():
+    # Readable district overlays make the map behave like a planning model, not only a collection of buildings.
+    districts = [
+        ("分区边界_入口共享区", 0, -39, 52, 23, MATS["orange"], "入口共享区"),
+        ("分区边界_教学静区", -6, 6, 96, 34, MATS["blue"], "院落教学静区"),
+        ("分区边界_运动活力区", 47, -29, 51, 30, MATS["red"], "运动活力区"),
+        ("分区边界_生活后勤区", 42, 34, 62, 22, MATS["green"], "生活后勤区"),
+        ("分区边界_科技运维区", -49, -15, 34, 33, MATS["purple"], "科技运维区"),
+    ]
+    for name, x, y, w, d, material, label in districts:
+        cube(name, (x, y, 0.135), (w, d, 0.035), material, 0.03)
+        text(f"{name}_文字", label, (x, y + d / 2 - 1.6, 0.28), 0.46, MATS["white"])
+
+    # Additional controlled entries, parking, and service circulation.
+    cube("西侧后勤车行门岗", (-75.2, 34, 1.2), (0.7, 5.5, 2.4), MATS["brick"], 0.05)
+    cube("西侧后勤车行闸机", (-71.8, 34, 0.55), (5.8, 0.35, 1.1), MATS["metal"], 0.03)
+    cube("东侧运动场应急门", (75.2, -33, 1.2), (0.7, 6.2, 2.4), MATS["brick"], 0.05)
+    cube("东侧应急车行闸机", (71.5, -33, 0.55), (6.2, 0.35, 1.1), MATS["red"], 0.03)
+    cube("访客停车场", (-47, -50.5, 0.13), (20, 5.4, 0.08), MATS["road"], 0.03)
+    cube("教职工停车场", (-56, 43.5, 0.13), (21, 6.0, 0.08), MATS["road"], 0.03)
+    for i, x in enumerate([-54, -50, -46, -42, -38]):
+        cube(f"访客停车位_{i}", (x, -50.5, 0.19), (0.12, 4.8, 0.025), MATS["parking"], 0.004)
+    for i, x in enumerate([-64, -60, -56, -52, -48]):
+        cube(f"教职工停车位_{i}", (x, 43.5, 0.19), (0.12, 5.3, 0.025), MATS["parking"], 0.004)
+    cube("设施索引_多门岗停车系统", (-67, 40, 0.48), (1.0, 1.0, 0.55), MATS["orange"], 0.04)
+
+    # Administration cutaway inside the library/administration center.
+    admin_rooms = [
+        ("校长室", -5.0, -23.6, MATS["wood"]),
+        ("行政办公室", -2.5, -23.6, MATS["white"]),
+        ("教务处", 0.0, -23.6, MATS["blue"]),
+        ("总务处", 2.5, -23.6, MATS["green"]),
+        ("财务室", 5.0, -23.6, MATS["yellow"]),
+        ("会议室", -3.2, -18.0, MATS["stone"]),
+        ("档案室", 3.2, -18.0, MATS["metal"]),
+    ]
+    for name, x, y, material in admin_rooms:
+        cube(f"行政剖面_{name}", (x, y, 6.38), (2.1, 1.55, 0.13), material, 0.025)
+        cube(f"行政剖面_{name}_桌柜", (x, y, 6.55), (1.15, 0.38, 0.18), MATS["wood"], 0.015)
+        text(f"行政剖面_{name}_标签", name, (x, y, 6.8), 0.24, MATS["white"])
+    cube("设施索引_行政办公剖面", (0, -21, 7.05), (1.0, 1.0, 0.35), MATS["orange"], 0.03)
+
+    # Science safety equipment around chemistry and biology labs.
+    lab_safety_nodes = [
+        ("化学品暂存柜", -22.0, -31.3, MATS["yellow"]),
+        ("危废暂存箱", -24.2, -31.3, MATS["red"]),
+        ("通风橱", -23.0, -27.9, MATS["metal"]),
+        ("紧急冲淋洗眼器", -20.8, -29.4, MATS["green"]),
+        ("生物安全柜", -18.2, -31.3, MATS["screen"]),
+    ]
+    for name, x, y, material in lab_safety_nodes:
+        cube(name, (x, y, 1.38), (0.62, 0.42, 1.15), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.75, 0.75, 0.46), MATS["orange"], 0.03)
+
+    # Campus water, HVAC, and fire infrastructure as dedicated service rooms.
+    utility_nodes = [
+        ("空调能源站", -59, 35.5, MATS["white"]),
+        ("冷水机组", -63, 35.5, MATS["metal"]),
+        ("循环水泵", -55, 35.5, MATS["blue"]),
+        ("消防水池", -69, 36, MATS["water"]),
+        ("消防泵房", -69, 31, MATS["red"]),
+        ("生活水泵房", -54, 31, MATS["green"]),
+        ("弱电间IDF节点", -48, 2, MATS["screen"]),
+        ("弱电间IDF节点_生活区", 43, 29, MATS["screen"]),
+    ]
+    for name, x, y, material in utility_nodes:
+        cube(name, (x, y, 1.0), (2.6, 1.8, 1.75), material, 0.05)
+        cube(f"设施索引_{name}", (x, y, 0.36), (0.78, 0.78, 0.44), MATS["orange"], 0.03)
+    cube("楼宇自控BAS控制柜", (-36, -4.0, 1.45), (1.0, 0.75, 1.7), MATS["screen"], 0.04)
+    cube("一键日夜模式控制屏", (-36, -3.0, 1.35), (0.85, 0.18, 0.55), MATS["screen"], 0.02)
+    cube("室外照明回路控制箱", (-35, -3.0, 0.92), (0.72, 0.38, 1.1), MATS["yellow"], 0.03)
+
+    # Athletics completeness: spectator, official, and field-event elements.
+    cube("操场看台_主体", (45, -47.3, 1.0), (34, 3.4, 1.8), MATS["stone"], 0.08)
+    for i in range(4):
+        cube(f"操场看台_座席层_{i}", (45, -48.2 + i * 0.55, 1.45 + i * 0.18), (32, 0.25, 0.15), MATS["wood"], 0.02)
+    cube("操场主席台", (45, -51.2, 1.4), (12, 2.0, 2.2), MATS["brick"], 0.08)
+    cube("操场电子记分屏", (63.5, -28, 3.0), (0.18, 5.4, 2.4), MATS["screen"], 0.03)
+    cube("跳远沙坑", (20, -24, 0.15), (8.5, 2.6, 0.12), MATS["paving"], 0.04)
+    cube("铅球投掷区", (28, -21, 0.15), (4.0, 4.0, 0.1), MATS["paving"], 0.08)
+    cube("设施索引_操场看台主席台记分屏", (45, -47.3, 2.4), (1.0, 1.0, 0.48), MATS["orange"], 0.04)
+
+    # Outdoor learning landscapes.
+    cyl("露天剧场_半圆台阶", (-25, 38, 0.18), 5.0, 0.12, MATS["stone"], vertices=48)
+    cyl("露天剧场_中心舞台", (-25, 38, 0.38), 2.3, 0.2, MATS["wood"], vertices=48)
+    cube("阅读花园_木平台", (-7, 37, 0.18), (10, 4.2, 0.14), MATS["wood"], 0.05)
+    for i, x in enumerate([-10, -7, -4]):
+        cube(f"阅读花园_长椅_{i}", (x, 37.4, 0.48), (1.9, 0.35, 0.28), MATS["wood"], 0.03)
+    cube("生态课程湿地", (-39, 40.5, 0.13), (10, 3.2, 0.08), MATS["wetland"], 0.06)
+    cube("劳动教育菜园", (8, 38, 0.14), (10, 4.0, 0.09), MATS["green"], 0.04)
+    cube("校园温室", (19, 38, 1.05), (7.5, 3.2, 2.0), MATS["glass"], 0.06)
+    cube("设施索引_室外学习景观", (-7, 39.8, 0.52), (1.0, 1.0, 0.5), MATS["orange"], 0.04)
+
+
 def make_sports_and_living():
     # Outdoor athletics
     cube("outdoor playground base", (45, -28, 0.06), (44, 26, 0.08), MATS["track"], 0.3)
@@ -568,6 +663,7 @@ PREVIEW_VIEWS = [
     ("09_楼内剖面和管廊", (74, 58, 34), (15, 13, 4), 28),
     ("10_后勤边界和服务节点", (88, 74, 34), (48, 30, 2), 30),
     ("11_图书体育公共服务", (64, -6, 28), (22, -14, 5), 30),
+    ("12_规划行政实验安全运动", (-76, 62, 31), (-20, 12, 3), 28),
 ]
 
 
@@ -633,6 +729,7 @@ def build_scene():
     make_cutaway_interiors_and_tunnels()
     make_daily_school_services()
     make_public_amenities_and_special_interiors()
+    make_planning_admin_and_learning_landscape()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
