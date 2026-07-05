@@ -303,6 +303,63 @@ def make_smart_safety_energy_systems():
     text("digital twin label", "数字孪生总控：安防/能耗/广播/消防/网络", (-36, -13.12, 2.92), 0.35, MATS["light"], rot=(math.radians(90), 0, 0))
 
 
+def make_cutaway_interiors_and_tunnels():
+    # Typical classroom floor plates made readable from the aerial view.
+    for b, (cx, cy) in enumerate([(-38, 4), (-12, 12), (14, 12), (40, 4)]):
+        cube(f"剖面_教学楼{b}_走廊", (cx, cy, 5.18), (15.5, 1.0, 0.08), MATS["paving"], 0.02)
+        for i, ox in enumerate([-5.5, -1.8, 1.8, 5.5]):
+            cube(f"剖面_教学楼{b}_普通教室_{i}", (cx + ox, cy + 2.4, 5.25), (2.8, 2.4, 0.12), MATS["white"], 0.02)
+            cube(f"剖面_教学楼{b}_智慧黑板_{i}", (cx + ox, cy + 1.18, 5.48), (1.8, 0.08, 0.28), MATS["screen"], 0.01)
+            for row in range(2):
+                for col in range(2):
+                    cube(f"剖面_教学楼{b}_课桌_{i}_{row}_{col}", (cx + ox - 0.55 + col * 1.1, cy + 2.1 + row * 0.55, 5.42), (0.55, 0.32, 0.08), MATS["stone"], 0.01)
+        cube(f"剖面_教学楼{b}_教师办公室", (cx - 5.5, cy - 2.2, 5.25), (3.0, 2.2, 0.12), MATS["glass"], 0.02)
+        cube(f"剖面_教学楼{b}_楼梯间", (cx + 5.7, cy - 2.2, 5.25), (2.1, 2.1, 0.14), MATS["metal"], 0.02)
+        cube(f"设施索引_教学楼{b}_楼层剖面", (cx, cy, 5.65), (1.0, 1.0, 0.35), MATS["orange"], 0.03)
+
+    # Dining hall internals.
+    for row in range(3):
+        for col in range(5):
+            cube(f"食堂餐桌_{row}_{col}", (25.2 + col * 1.9, 28.6 + row * 1.25, 4.55), (1.1, 0.55, 0.1), MATS["white"], 0.02)
+            cyl(f"食堂圆凳_{row}_{col}_a", (24.75 + col * 1.9, 28.6 + row * 1.25, 4.33), 0.18, 0.16, MATS["orange"], vertices=18)
+            cyl(f"食堂圆凳_{row}_{col}_b", (25.65 + col * 1.9, 28.6 + row * 1.25, 4.33), 0.18, 0.16, MATS["orange"], vertices=18)
+    cube("食堂后厨操作间", (34.8, 34.6, 4.55), (6.5, 2.2, 0.18), MATS["metal"], 0.03)
+    for i in range(4):
+        cube(f"食堂取餐窗口_{i}", (28.5 + i * 1.5, 35.2, 4.85), (1.0, 0.1, 0.42), MATS["screen"], 0.01)
+    cube("设施索引_食堂内部剖面", (30, 31, 4.95), (1.0, 1.0, 0.35), MATS["orange"], 0.03)
+
+    # Dormitory room band.
+    for i in range(8):
+        x = 43.0 + i * 2.9
+        cube(f"宿舍房间_{i}", (x, 28.2, 6.05), (2.2, 2.0, 0.14), MATS["white"], 0.02)
+        cube(f"宿舍床位_{i}_a", (x - 0.45, 28.2, 6.22), (0.72, 1.55, 0.12), MATS["blue"], 0.02)
+        cube(f"宿舍床位_{i}_b", (x + 0.45, 28.2, 6.22), (0.72, 1.55, 0.12), MATS["green"], 0.02)
+    cube("宿舍公共洗衣房", (62, 34.8, 6.05), (4.2, 2.0, 0.14), MATS["glass"], 0.02)
+    cube("设施索引_宿舍内部剖面", (54, 31, 6.55), (1.0, 1.0, 0.35), MATS["orange"], 0.03)
+
+    # Indoor sports hall markings.
+    cube("室内操场木地板", (55, 11, 7.62), (18.5, 11.2, 0.08), MATS["wood"] if "wood" in MATS else MATS["stone"], 0.03)
+    cube("室内篮球场中线", (55, 11, 7.69), (0.12, 10.2, 0.03), MATS["parking"], 0.004)
+    cyl("室内篮球场中圈", (55, 11, 7.72), 1.25, 0.035, MATS["parking"], vertices=48)
+    for y in [6.1, 15.9]:
+        cyl(f"室内篮球架_{y}", (55, y, 8.45), 0.06, 2.6, MATS["metal"], vertices=12, rot=(math.radians(90), 0, 0))
+        cube(f"室内篮球板_{y}", (55, y, 9.15), (1.6, 0.08, 0.9), MATS["glass"], 0.02)
+    cube("设施索引_室内操场内部", (55, 11, 8.2), (1.0, 1.0, 0.35), MATS["orange"], 0.03)
+
+    # Underground utility gallery with service manholes.
+    cube("地下综合管廊_主廊", (-18, -11.5, -0.22), (82, 1.0, 0.28), MATS["metal"], 0.04)
+    cube("地下综合管廊_支廊_教学区", (-8, 7, -0.22), (1.0, 38, 0.28), MATS["metal"], 0.04)
+    cube("地下综合管廊_支廊_生活区", (35, 22, -0.22), (1.0, 34, 0.28), MATS["metal"], 0.04)
+    for i, (x, y) in enumerate([(-57, -11.5), (-36, -11.5), (0, -11.5), (35, -11.5), (35, 22), (-8, 7)]):
+        cyl(f"综合管廊检修井_{i}", (x, y, 0.05), 0.55, 0.12, MATS["metal"], vertices=28)
+    cube("设施索引_地下综合管廊", (-18, -11.5, 0.38), (1.0, 1.0, 0.55), MATS["orange"], 0.04)
+
+    # Assembly areas.
+    for i, (x, y, label) in enumerate([(-18, -36, "南侧疏散集结点"), (8, 22, "中心疏散集结点"), (55, -43, "操场疏散集结点")]):
+        cube(f"{label}_地面标识", (x, y, 0.16), (7.5, 4.5, 0.06), MATS["red"], 0.04)
+        text(f"{label}_文字", label, (x, y, 0.28), 0.42, MATS["white"])
+
+
 def make_sports_and_living():
     # Outdoor athletics
     cube("outdoor playground base", (45, -28, 0.06), (44, 26, 0.08), MATS["track"], 0.3)
@@ -405,6 +462,7 @@ PREVIEW_VIEWS = [
     ("06_生活组团与后勤能源", (10, 66, 25), (18, 28, 1), 30),
     ("07_STEM实验和创新空间", (-45, -44, 18), (-23, -24, 1), 30),
     ("08_交通消防能源系统", (-74, -72, 26), (-24, -32, 1), 26),
+    ("09_楼内剖面和管廊", (74, 58, 34), (15, 13, 4), 28),
 ]
 
 
@@ -467,6 +525,7 @@ def build_scene():
     make_service_and_safety()
     make_transport_and_access()
     make_smart_safety_energy_systems()
+    make_cutaway_interiors_and_tunnels()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
