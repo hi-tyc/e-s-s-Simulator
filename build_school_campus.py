@@ -419,6 +419,50 @@ def make_daily_school_services():
     cube("设施索引_校园气象站空气质量", (-61, 38, 0.55), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
 
 
+def make_public_amenities_and_special_interiors():
+    # Library/admin internal reading and resource zones.
+    cube("图书馆内部_开放阅览区", (0, -21, 5.55), (11.5, 5.6, 0.16), MATS["white"], 0.03)
+    for i, x in enumerate([-4.5, -2.7, -0.9, 0.9, 2.7, 4.5]):
+        cube(f"图书馆书架_{i}", (x, -22.6, 5.9), (0.36, 2.4, 0.85), MATS["wood"] if "wood" in MATS else MATS["stone"], 0.03)
+    for row in range(2):
+        for col in range(4):
+            cube(f"阅览区桌椅_{row}_{col}", (-3.6 + col * 2.4, -18.9 + row * 1.25, 5.88), (1.2, 0.55, 0.12), MATS["paving"], 0.02)
+    cube("图书馆自助借还机", (5.4, -18.2, 5.95), (0.55, 0.45, 0.75), MATS["screen"], 0.04)
+    cube("设施索引_图书馆内部阅览区", (0, -21, 6.18), (1.0, 1.0, 0.38), MATS["orange"], 0.03)
+
+    # Sports support spaces.
+    for i, (x, y, name, color) in enumerate([(47, 18.4, "体育更衣室", MATS["blue"]), (51, 18.4, "淋浴间", MATS["white"]), (59, 18.4, "体育器材室", MATS["orange"]), (63, 18.4, "裁判医务点", MATS["green"])]):
+        cube(f"设施索引_{name}", (x, y, 7.95), (0.95, 0.95, 0.36), MATS["orange"], 0.03)
+        cube(f"{name}_剖面房间", (x, y, 7.68), (3.2, 2.0, 0.14), color, 0.03)
+        cube(f"{name}_柜台设备", (x, y + 0.52, 7.9), (1.8, 0.28, 0.26), MATS["metal"], 0.02)
+    for i, x in enumerate([57.4, 58.2, 59.0, 59.8, 60.6]):
+        cyl(f"体育器材室_球架篮球_{i}", (x, 17.6, 8.1), 0.18, 0.18, MATS["orange"], vertices=18)
+
+    # Daily public service nodes across campus.
+    public_nodes = [
+        ("校园导视屏_入口", -4, -50, MATS["screen"]),
+        ("校园导视屏_中心", 2, -5, MATS["screen"]),
+        ("校园导视屏_生活区", 34, 27, MATS["screen"]),
+        ("AED急救箱_入口", -11, -51, MATS["red"]),
+        ("AED急救箱_操场", 22, -31, MATS["red"]),
+        ("AED急救箱_体育馆", 43, 13, MATS["red"]),
+        ("应急电话_西区", -53, 8, MATS["yellow"]),
+        ("应急电话_东区", 52, 3, MATS["yellow"]),
+        ("饮水点_教学区", -10, 3, MATS["blue"]),
+        ("饮水点_操场", 25, -38, MATS["blue"]),
+        ("储物柜_教学区", -16, 9, MATS["metal"]),
+        ("储物柜_体育馆", 48, 7, MATS["metal"]),
+        ("电子班牌_初中楼", -38, 10.4, MATS["screen"]),
+        ("电子班牌_高中楼", -12, 18.4, MATS["screen"]),
+        ("电子班牌_国际部", 14, 18.4, MATS["screen"]),
+        ("访客服务终端", -13, -50.8, MATS["screen"]),
+        ("充电服务站_自行车棚", 37, -51.8, MATS["green"]),
+    ]
+    for name, x, y, material in public_nodes:
+        cube(name, (x, y, 1.0), (0.72, 0.35, 1.45), material, 0.04)
+        cube(f"设施索引_{name}", (x, y, 0.32), (0.8, 0.8, 0.42), MATS["orange"], 0.03)
+
+
 def make_sports_and_living():
     # Outdoor athletics
     cube("outdoor playground base", (45, -28, 0.06), (44, 26, 0.08), MATS["track"], 0.3)
@@ -523,6 +567,7 @@ PREVIEW_VIEWS = [
     ("08_交通消防能源系统", (-74, -72, 26), (-24, -32, 1), 26),
     ("09_楼内剖面和管廊", (74, 58, 34), (15, 13, 4), 28),
     ("10_后勤边界和服务节点", (88, 74, 34), (48, 30, 2), 30),
+    ("11_图书体育公共服务", (64, -6, 28), (22, -14, 5), 30),
 ]
 
 
@@ -587,6 +632,7 @@ def build_scene():
     make_smart_safety_energy_systems()
     make_cutaway_interiors_and_tunnels()
     make_daily_school_services()
+    make_public_amenities_and_special_interiors()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
