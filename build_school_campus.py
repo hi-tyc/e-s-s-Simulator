@@ -1545,6 +1545,92 @@ def make_night_weather_resilience_operations():
     cube("设施索引_夜间天气韧性运行", (-32, -47.8, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_wireless_edge_network_operations():
+    # Wireless and edge-computing layer: show daily digital infrastructure beyond the backbone fiber.
+    ap_points = [
+        ("无线AP_图书馆阅览", -4, -20.6),
+        ("无线AP_STEM实验", -23, -24),
+        ("无线AP_初中组团", -38, 4),
+        ("无线AP_高中组团", -12, 12),
+        ("无线AP_国际部组团", 14, 12),
+        ("无线AP_共享教室", 40, 4),
+        ("无线AP_体育馆", 55, 11),
+        ("无线AP_食堂", 30, 31),
+        ("无线AP_宿舍", 54, 31),
+        ("无线AP_操场看台", 45, -40),
+        ("无线AP_校门广场", 0, -50),
+        ("无线AP_外语中心", 18, -18),
+    ]
+    for name, x, y in ap_points:
+        cyl(name, (x, y, 5.4 if y > -5 else 3.8), 0.28, 0.12, MATS["white"], vertices=24, bevel=True)
+        cyl(f"{name}_覆盖圈", (x, y, 0.16), 3.6, 0.035, MATS["glass"], vertices=48)
+        cube(f"设施索引_{name}", (x, y, 0.48), (0.52, 0.52, 0.28), MATS["orange"], 0.016)
+
+    edge_nodes = [
+        ("边缘计算盒_教学区", -12, 6, MATS["panel"]),
+        ("边缘计算盒_体育区", 55, 4, MATS["panel"]),
+        ("边缘计算盒_生活区", 54, 25, MATS["panel"]),
+        ("边缘计算盒_入口区", -4, -50, MATS["panel"]),
+        ("物联网网关_能耗水务", -62, 31, MATS["blue"]),
+        ("物联网网关_安防消防", -36, -5, MATS["blue"]),
+        ("物联网网关_环境健康", -18, 38, MATS["blue"]),
+        ("物联网网关_交通到达", 16, -55, MATS["blue"]),
+    ]
+    for name, x, y, material in edge_nodes:
+        cube(name, (x, y, 1.1), (1.2, 0.8, 1.05), material, 0.04)
+        cube(f"{name}_状态灯", (x, y - 0.43, 1.34), (0.72, 0.06, 0.22), MATS["screen"], 0.012)
+        cube(f"设施索引_{name}", (x, y, 0.34), (0.58, 0.58, 0.32), MATS["orange"], 0.018)
+
+    cyber_nodes = [
+        ("校园核心交换机", -37.8, -21.3, MATS["blue"]),
+        ("下一代防火墙", -35.8, -21.3, MATS["red"]),
+        ("网络准入NAC控制器", -33.8, -21.3, MATS["panel"]),
+        ("日志审计与安全态势屏", -31.8, -21.3, MATS["screen"]),
+        ("备份容灾一体机", -29.8, -21.3, MATS["metal"]),
+    ]
+    for name, x, y, material in cyber_nodes:
+        cube(name, (x, y, 2.62), (1.45, 0.8, 0.48), material, 0.03)
+        cube(f"设施索引_{name}", (x, y, 3.05), (0.46, 0.46, 0.24), MATS["orange"], 0.014)
+
+    clock_broadcast = [
+        ("NTP时钟服务器", -36.5, -19.2, MATS["screen"]),
+        ("校园统一时钟屏_入口", -2, -49.0, MATS["screen"]),
+        ("校园统一时钟屏_教学楼", -12, 16.6, MATS["screen"]),
+        ("校园统一时钟屏_体育馆", 50, 4.8, MATS["screen"]),
+        ("IP广播分区终端_教学区", -18, 9, MATS["white"]),
+        ("IP广播分区终端_操场", 44, -33, MATS["white"]),
+        ("IP广播分区终端_宿舍", 52, 25, MATS["white"]),
+    ]
+    for name, x, y, material in clock_broadcast:
+        cube(name, (x, y, 1.4), (1.15, 0.42, 0.92), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.55, 0.55, 0.3), MATS["orange"], 0.016)
+
+    wireless_routes = [
+        ("无线控制器到教学AP链路", -36, -22, -12, 12, MATS["blue"], 0.1),
+        ("无线控制器到体育AP链路", -36, -22, 55, 11, MATS["blue"], 0.1),
+        ("无线控制器到宿舍AP链路", -36, -22, 54, 31, MATS["blue"], 0.1),
+        ("无线控制器到校门AP链路", -36, -22, 0, -50, MATS["blue"], 0.1),
+        ("IoT传感器汇聚链路_环境", -18, 38, -31.5, -4.6, MATS["green"], 0.1),
+        ("IoT传感器汇聚链路_能耗", -62, 31, -31.5, -4.6, MATS["green"], 0.1),
+        ("安全日志回传链路", -36, -7, -31.8, -21.3, MATS["red"], 0.1),
+    ]
+    for name, x1, y1, x2, y2, material, width in wireless_routes:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, 0.28), (length, width, 0.06), material, 0.005, rot_z=angle)
+
+    cube("无线网络边缘计算总览牌", (-48, -15.2, 1.35), (25, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "无线网络边缘计算总览牌_文字",
+        "数字底座：无线AP覆盖/边缘计算/IoT网关/防火墙/NAC/日志审计/NTP/IP广播",
+        (-48, -15.45, 1.42),
+        0.29,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_无线网络边缘计算", (-48, -15.2, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1632,6 +1718,7 @@ PREVIEW_VIEWS = [
     ("23_外语国际交流学习中心", (54, -45, 21), (18, -18, 2), 30),
     ("24_校外周边市政界面", (48, -92, 24), (0, -61, 1), 28),
     ("25_夜间天气韧性运行", (62, -74, 25), (6, -32, 2), 28),
+    ("26_无线网络边缘计算", (-82, -42, 24), (-30, -14, 2), 28),
 ]
 
 
@@ -1711,6 +1798,7 @@ def build_scene():
     make_language_international_exchange_center()
     make_surrounding_city_interface()
     make_night_weather_resilience_operations()
+    make_wireless_edge_network_operations()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
