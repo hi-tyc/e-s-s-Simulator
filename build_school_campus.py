@@ -1066,6 +1066,70 @@ def make_culture_arts_student_center():
     cube("设施索引_文化艺术社团中心", (11, -41.8, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_transport_accessibility_operations():
+    # Arrival and mobility operations: parent pickup, buses, bikes, pedestrians, accessibility, and logistics separation.
+    arrival_nodes = [
+        ("家长接送即停即走区", (18, -55.0, 0.16), (24, 2.0, 0.08), MATS["road"]),
+        ("家长等候雨棚", (18, -51.8, 1.85), (18, 2.2, 0.26), MATS["roof"]),
+        ("学生排队缓冲区", (4, -49.0, 0.18), (12, 3.0, 0.08), MATS["paving"]),
+        ("访客登记落客点", (-11.5, -49.3, 0.2), (4.6, 2.2, 0.08), MATS["orange"]),
+        ("校车候车雨棚", (-32, -51.2, 1.85), (24, 2.2, 0.26), MATS["roof"]),
+        ("共享单车停放区", (43, -52.8, 0.18), (8.4, 2.4, 0.08), MATS["paving"]),
+    ]
+    for name, loc, size, material in arrival_nodes:
+        cube(name, loc, size, material, 0.04)
+        cube(f"设施索引_{name}", (loc[0], loc[1], 0.48), (0.78, 0.78, 0.42), MATS["orange"], 0.025)
+    for i, x in enumerate([-43, -35, -27, -19, 10, 15, 20, 25]):
+        cube(f"接送区车位编号_{i}", (x, -55.0, 0.23), (3.2, 0.08, 0.03), MATS["parking"], 0.004)
+    for i, x in enumerate([39.8, 41.6, 43.4, 45.2]):
+        cyl(f"共享单车停车架_{i}", (x, -52.8, 0.45), 0.08, 1.2, MATS["metal"], vertices=12, rot=(math.radians(90), 0, 0))
+
+    route_specs = [
+        ("步行优先流线", 0, -55.0, 0, -21.0, MATS["white"], 0.22),
+        ("家长接送流线", 30, -55.0, 6, -50.5, MATS["orange"], 0.22),
+        ("校车运行流线", -47, -55.0, -18, -52.0, MATS["yellow"], 0.24),
+        ("自行车骑行流线", 42, -54.5, 35, -15.0, MATS["green"], 0.18),
+        ("后勤车辆分流线", -72, 34.0, 67, 34.0, MATS["blue"], 0.2),
+        ("无障碍到达流线", 9.5, -50.0, 12.0, 32.0, MATS["white"], 0.26),
+    ]
+    for name, x1, y1, x2, y2, material, width in route_specs:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, 0.42), (length, width, 0.06), material, 0.006, rot_z=angle)
+        cyl(f"{name}_方向箭头", (x2, y2, 0.48), 0.38, 0.08, material, vertices=3, rot=(0, 0, angle - math.pi / 2))
+
+    accessibility_nodes = [
+        ("无障碍电梯入口_图书馆", 7.8, -20.8, MATS["screen"]),
+        ("无障碍电梯入口_教学楼", -18.0, 15.5, MATS["screen"]),
+        ("无障碍电梯入口_体育馆", 43.5, 12.0, MATS["screen"]),
+        ("无障碍卫生间_入口", 7.0, -47.5, MATS["white"]),
+        ("盲道节点_校门", 0, -50.2, MATS["yellow"]),
+        ("盲道节点_图书馆", 0, -22.0, MATS["yellow"]),
+        ("盲道节点_医务中心", 12, 31.0, MATS["yellow"]),
+    ]
+    for name, x, y, material in accessibility_nodes:
+        cube(name, (x, y, 0.92), (1.2, 0.7, 1.15), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.35), (0.7, 0.7, 0.42), MATS["orange"], 0.025)
+
+    traffic_ops = [
+        ("交通诱导屏_南门", -6, -56.2, MATS["screen"]),
+        ("交通诱导屏_西门", -71.8, 34, MATS["screen"]),
+        ("交通诱导屏_东应急门", 71.5, -33, MATS["screen"]),
+        ("停车余位显示屏", -54, -47.5, MATS["screen"]),
+        ("交通流量检测器", 31, -55.2, MATS["screen"]),
+        ("违停抓拍摄像机", 21, -55.2, MATS["white"]),
+        ("后勤车辆预约终端", 61.5, 34, MATS["screen"]),
+        ("应急车辆集结位", 58, -47.0, MATS["red"]),
+    ]
+    for name, x, y, material in traffic_ops:
+        cube(name, (x, y, 1.18), (0.92, 0.42, 1.5), material, 0.035)
+        cube(f"设施索引_{name}", (x, y, 0.4), (0.72, 0.72, 0.42), MATS["orange"], 0.025)
+
+    cube("交通到达无障碍总览牌", (18, -59.0, 1.35), (34, 0.38, 1.9), MATS["panel"], 0.06)
+    text("交通到达无障碍总览牌_文字", "交通到达：步行/校车/家长接送/骑行/后勤/消防分流与无障碍连续路径", (18, -59.25, 1.42), 0.32, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_交通到达无障碍运营", (18, -59.0, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1147,6 +1211,7 @@ PREVIEW_VIEWS = [
     ("17_智慧安全消防韧性系统", (-82, -62, 25), (-24, -27, 2), 28),
     ("18_低碳生态科学运维", (-88, 72, 28), (-38, 40, 2), 30),
     ("19_文化艺术社团公共学习", (52, -58, 24), (12, -27, 3), 30),
+    ("20_交通到达无障碍运营", (40, -80, 23), (5, -50, 2), 28),
 ]
 
 
@@ -1220,6 +1285,7 @@ def build_scene():
     make_security_fire_resilience_detail()
     make_low_carbon_science_operations()
     make_culture_arts_student_center()
+    make_transport_accessibility_operations()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
