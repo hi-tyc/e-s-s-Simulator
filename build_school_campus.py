@@ -275,6 +275,84 @@ def make_fangshan_public_reference_reconstruction():
     cube("设施索引_南外方山公开资料复刻层", (-64, 18, 2.05), (1.0, 1.0, 0.45), MATS["orange"], 0.01)
 
 
+def make_fangshan_high_fidelity_public_details():
+    # Second-pass public-source fidelity layer: turns published descriptions/photos into concrete facade, section, and interior cues.
+    detail_panels = [
+        ("南外方山高相似复刻_公开关键词_学苑方城", -63, 30, "学苑方城：以方正校园肌理组织教学/生活/运动"),
+        ("南外方山高相似复刻_公开关键词_第三代学校", -63, 32.4, "第三代学校：非结构化学习空间、共享学习街、开放交流"),
+        ("南外方山高相似复刻_公开关键词_公学式校园", -63, 34.8, "公学式校园：红砖立面、院落尺度、城市展示面"),
+        ("南外方山高相似复刻_公开关键词_四学部", -63, 37.2, "四学部：小学/初中/高中/国际高中分区组织"),
+        ("南外方山高相似复刻_公开关键词_室内深化", -63, 39.6, "室内深化公开标段：教学楼/综合楼/生活楼室内界面继续细化"),
+    ]
+    for name, x, y, label in detail_panels:
+        cube(name, (x, y, 1.12), (19.5, 0.34, 1.36), MATS["panel"], 0.01)
+        text(f"{name}_文字", label, (x, y - 0.22, 1.15), 0.22, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    school_sections = [
+        ("小学部", 40, 4, MATS["yellow"], 3.6),
+        ("初中部", -38, 4, MATS["blue"], 4.2),
+        ("高中部", -12, 12, MATS["purple"], 4.8),
+        ("国际高中部", 14, 12, MATS["green"], 4.5),
+    ]
+    for name, x, y, material, height in school_sections:
+        cube(f"南外方山高相似复刻_{name}_学部铭牌", (x - 7.2, y - 8.0, 1.55), (0.28, 2.5, 1.5), material, 0.01)
+        text(f"南外方山高相似复刻_{name}_学部文字", name, (x - 7.38, y - 8.0, 1.62), 0.28, MATS["white"], rot=(math.radians(90), 0, math.radians(90)))
+        cube(f"南外方山高相似复刻_{name}_错落屋面标高", (x + 6.8, y + 5.6, height + 0.22), (4.8, 2.4, 0.18), MATS["roof"], 0.01)
+        cube(f"南外方山高相似复刻_{name}_暖白连廊端头", (x + 8.75, y - 1.8, 2.3), (0.32, 5.8, 2.6), MATS["stone"], 0.01)
+
+    facade_bands = [
+        ("南侧城市展示红砖表皮", 0, -36.2, 54, 0.22),
+        ("西侧教学组团红砖表皮", -49.2, 5.6, 0.22, 28),
+        ("东侧生活运动红砖表皮", 50.5, 17.5, 0.22, 35),
+    ]
+    for name, x, y, w, d in facade_bands:
+        cube(f"南外方山高相似复刻_{name}", (x, y, 2.35), (w, d, 3.2), MATS["brick"], 0.01)
+        count = 13 if w > d else 8
+        for i in range(count):
+            if w > d:
+                bx = x - w / 2 + 2.2 + i * max(1.0, (w - 4.4) / max(1, count - 1))
+                by = y - 0.16
+                size = (0.32, 0.08, 2.55)
+            else:
+                bx = x - 0.16
+                by = y - d / 2 + 2.0 + i * max(1.0, (d - 4.0) / max(1, count - 1))
+                size = (0.08, 0.32, 2.55)
+            cube(f"南外方山高相似复刻_{name}_竖向窗洞_{i}", (bx, by, 2.55), size, MATS["glass"])
+
+    nonformal_nodes = [
+        ("非结构化学习台阶_高中共享街", -12, 5.8),
+        ("非结构化学习台阶_国际部共享街", 14, 5.8),
+        ("非结构化学习台阶_初中共享街", -38, -2.2),
+        ("非结构化学习台阶_小学共享街", 40, -2.2),
+    ]
+    for name, x, y in nonformal_nodes:
+        for step in range(4):
+            cube(f"南外方山高相似复刻_{name}_{step}", (x, y + step * 0.55, 0.38 + step * 0.12), (5.6 - step * 0.55, 0.42, 0.18), MATS["wood"], 0.01)
+        cube(f"南外方山高相似复刻_{name}_学习白板", (x + 3.15, y + 1.0, 1.55), (0.12, 1.7, 1.1), MATS["white"], 0.01)
+        cube(f"南外方山高相似复刻_{name}_电子讨论屏", (x - 3.15, y + 1.0, 1.55), (0.12, 1.4, 0.85), MATS["screen"], 0.01)
+
+    interior_bands = [
+        ("教学楼室内深化_走廊吊顶灯带", -12, 12),
+        ("综合楼室内深化_图书行政共享厅", 0, -21),
+        ("生活楼室内深化_宿舍公共客厅", 54, 31),
+    ]
+    for name, x, y in interior_bands:
+        cube(f"南外方山高相似复刻_{name}_天花格栅", (x, y, 6.95), (9.5, 0.18, 0.12), MATS["wood"], 0.005)
+        cube(f"南外方山高相似复刻_{name}_暖光灯槽", (x, y + 0.42, 6.9), (9.5, 0.08, 0.08), MATS["light"], 0.004)
+        cube(f"南外方山高相似复刻_{name}_室内导视牌", (x - 4.4, y + 0.75, 6.25), (1.35, 0.08, 0.7), MATS["screen"], 0.006)
+
+    cube("南外方山高相似复刻_公开平立剖索引牌", (62, 44, 1.28), (22.0, 0.36, 1.8), MATS["panel"], 0.02)
+    text(
+        "南外方山高相似复刻_公开平立剖索引牌_文字",
+        "二轮细化：四学部/红砖城市展示面/错落标高/共享学习街/非结构化学习/室内深化标段",
+        (62, 43.76, 1.34),
+        0.25,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_南外方山高相似公开细化层", (62, 44, 2.42), (1.0, 1.0, 0.42), MATS["orange"], 0.01)
+
+
 def make_room_equipment(x, y, name):
     cube(f"{name} raised technical floor", (x, y, 0.18), (20, 12, 0.2), MATS["metal"], 0.04)
     cube(f"{name} room outline", (x, y, 1.2), (20.4, 12.4, 2.2), MATS["glass"], 0.04)
@@ -1976,6 +2054,7 @@ PREVIEW_VIEWS = [
     ("28_游戏主教学楼四层室内", (32, 42, 22), (-12, 12, 9), 34),
     ("29_游戏主教学楼导航交互", (-46, 32, 18), (-12, 12, 8), 40),
     ("30_南外方山公开资料复刻层", (82, -82, 54), (0, -4, 1), 30),
+    ("31_南外方山高相似公开细化", (72, 62, 36), (2, 16, 2), 32),
 ]
 
 
@@ -2032,6 +2111,7 @@ def build_scene():
     make_gate_and_security()
     make_academic_core()
     make_fangshan_public_reference_reconstruction()
+    make_fangshan_high_fidelity_public_details()
     make_technology_building()
     make_science_and_innovation_spaces()
     make_sports_and_living()
