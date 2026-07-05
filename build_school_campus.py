@@ -955,6 +955,61 @@ def make_security_fire_resilience_detail():
     cube("设施索引_智慧安全韧性系统", (-26, -43.5, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_low_carbon_science_operations():
+    # Low-carbon operations and environmental science layer for a measurable modern campus.
+    energy_nodes = [
+        ("光伏逆变器组", 6, -27.5, MATS["solar"]),
+        ("光伏汇流箱", 10, -27.5, MATS["yellow"]),
+        ("碳排能耗看板", 14, -27.5, MATS["screen"]),
+        ("楼宇能耗分项计量柜", 18, -27.5, MATS["panel"]),
+        ("电动车充电桩_访客", -42, -52.8, MATS["green"]),
+        ("电动车充电桩_教工", -52, 46.4, MATS["green"]),
+        ("校车充电桩", -19, -55.0, MATS["green"]),
+    ]
+    for name, x, y, material in energy_nodes:
+        cube(name, (x, y, 1.05), (1.3, 0.72, 1.55), material, 0.04)
+        cube(f"设施索引_{name}", (x, y, 0.36), (0.72, 0.72, 0.42), MATS["orange"], 0.025)
+    for i, (x1, y1, x2, y2) in enumerate([(6, -27.5, -51, 23), (14, -27.5, -36, -7), (-19, -55, -47, 23)]):
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(f"低碳能源数据线_{i}", ((x1 + x2) / 2, (y1 + y2) / 2, 0.52), (length, 0.14, 0.055), MATS["green"], 0.006, rot_z=angle)
+
+    water_nodes = [
+        ("雨水回用泵房", -71, 42.5, MATS["blue"]),
+        ("中水处理设备", -66.5, 45.5, MATS["water"]),
+        ("透水铺装样板区", -31, 43.5, MATS["paving"]),
+        ("智能灌溉阀箱", -14, 38.5, MATS["green"]),
+        ("土壤湿度传感器", -9, 39.8, MATS["screen"]),
+        ("水质在线监测站", -2, -2, MATS["screen"]),
+    ]
+    for name, x, y, material in water_nodes:
+        cube(name, (x, y, 0.92), (2.1, 1.25, 1.35), material, 0.045)
+        cube(f"设施索引_{name}", (x, y, 0.34), (0.72, 0.72, 0.42), MATS["orange"], 0.025)
+    for i, (x, y) in enumerate([(-38, 40.5), (-32, 40.5), (-26, 40.5), (-18, 38.5), (-10, 38.5), (8, 38.0)]):
+        cyl(f"智能灌溉喷头_{i}", (x, y, 0.32), 0.16, 0.12, MATS["blue"], vertices=18)
+
+    ecology_nodes = [
+        ("校园生物多样性样方", -44, 44.5, MATS["wetland"]),
+        ("昆虫旅馆", -41, 43.1, MATS["wood"]),
+        ("鸟类观察点", -36, 43.3, MATS["green"]),
+        ("屋顶绿化实验田", 25, -21, MATS["green"]),
+        ("热岛温度传感器", 0, 30, MATS["screen"]),
+        ("噪声监测站_校门", -2, -54.5, MATS["screen"]),
+        ("噪声监测站_操场", 35, -43, MATS["screen"]),
+        ("微气候观测塔", -58, 40.5, MATS["metal"]),
+    ]
+    for name, x, y, material in ecology_nodes:
+        cube(name, (x, y, 1.0), (2.2, 1.2, 1.35), material, 0.045)
+        cube(f"设施索引_{name}", (x, y, 0.34), (0.72, 0.72, 0.42), MATS["orange"], 0.025)
+    cyl("微气候观测塔_风廓线杆", (-58, 40.5, 3.2), 0.08, 4.0, MATS["metal"], vertices=12)
+    for i, z in enumerate([2.3, 3.1, 3.9]):
+        cube(f"微气候观测塔_传感器_{i}", (-57.6, 40.5, z), (0.42, 0.2, 0.28), MATS["screen"], 0.015)
+
+    cube("科学运维数字孪生看板", (-48, 48.6, 1.45), (24, 0.42, 2.1), MATS["screen"], 0.06)
+    text("科学运维数字孪生看板_文字", "低碳科学运维：光伏/储能/充电/雨洪回用/水质/噪声/热岛/生物多样性", (-48, 48.32, 1.52), 0.32, MATS["light"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_低碳生态科学运维", (-48, 48.6, 2.65), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1034,6 +1089,7 @@ PREVIEW_VIEWS = [
     ("15_生活后勤食堂宿舍运营", (84, 58, 24), (52, 35, 4), 30),
     ("16_体育健康室内外系统", (84, -56, 26), (52, -18, 4), 30),
     ("17_智慧安全消防韧性系统", (-82, -62, 25), (-24, -27, 2), 28),
+    ("18_低碳生态科学运维", (-88, 72, 28), (-38, 40, 2), 30),
 ]
 
 
@@ -1105,6 +1161,7 @@ def build_scene():
     make_living_logistics_detail()
     make_sports_health_detail()
     make_security_fire_resilience_detail()
+    make_low_carbon_science_operations()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
