@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 21
+EXPECTED_PREVIEW_COUNT = 22
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -337,6 +337,37 @@ REQUIRED_KEYWORDS = [
     "管廊通风井",
     "机电管线楼宇运维总览牌",
     "机电管线楼宇运维",
+    "校园综合运营中心",
+    "校务数据中台大屏",
+    "课表铃声控制器",
+    "电子校历活动看板",
+    "班级课表同步屏",
+    "教务排课服务器",
+    "考试考务保密室",
+    "试卷流转保险柜",
+    "成绩与学情分析屏",
+    "资产报修工单屏",
+    "移动巡检PDA充电柜",
+    "值班排班看板",
+    "校园广播分区矩阵",
+    "校园运行日报屏",
+    "访客预约二维码闸机",
+    "车辆预约白名单终端",
+    "校园一卡通充值终端",
+    "校内导航触摸屏",
+    "家校通知发布屏",
+    "晨检午检健康上报终端",
+    "实验室预约与危化品审批屏",
+    "体育场地预约屏",
+    "食堂错峰就餐调度屏",
+    "宿舍晚归点名终端",
+    "会议室预约门牌",
+    "师生服务中心窗口",
+    "校务数据总线",
+    "行政值班巡检点",
+    "教学楼值班巡检点",
+    "校园治理运行总览牌",
+    "校园治理运行中枢",
 ]
 
 
