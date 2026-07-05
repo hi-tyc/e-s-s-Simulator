@@ -64,8 +64,9 @@ The full campus scene includes:
 - Wayfinding screens, AED boxes, emergency phones, drinking water points, lockers, electronic class boards, visitor terminal, and charging station.
 - Map delivery aids: coordinate grid, north arrow, scale bar, building ID tags, floor-function boards, route layers, system overview boards, CCTV coverage disks, and electronic layer-control console.
 - Teaching-detail layer: grade-zone boards, classroom room numbers, teacher offices, preparation rooms, grade offices, storage rooms, covered corridors, a capacity schedule board, and an embedded 55-seat smart-classroom cutaway with four paired-desk groups.
+- Living/logistics operations: canteen receiving, cold/dry storage, rough processing, cooking, serving, dishwashing/disinfection, retained-sample cabinet, food-safety screen, dorm sample rooms, bathrooms, shower, laundry, study, houseparent, logistics storage, repair workshop, cold-chain bay, kitchen-waste cold box, and fume purification.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 14 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 15 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 

@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 14
+EXPECTED_PREVIEW_COUNT = 15
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -172,6 +172,34 @@ REQUIRED_KEYWORDS = [
     "吊扇",
     "壁挂空调",
     "容量统计总表",
+    "食堂后厨_收货验收区",
+    "食堂后厨_冷库",
+    "食堂后厨_干货库",
+    "食堂后厨_粗加工间",
+    "食堂后厨_烹饪区",
+    "食堂后厨_备餐间",
+    "食堂后厨_洗消间",
+    "食堂后厨_留样柜",
+    "食堂食品安全监测屏",
+    "食堂洁污分流动线",
+    "食堂餐盘回收口",
+    "宿舍样板间_四人间",
+    "宿舍公共卫生间",
+    "宿舍淋浴间",
+    "宿舍洗衣烘干房",
+    "宿舍夜间值班室",
+    "宿舍公共自习室",
+    "宿舍生活导师室",
+    "后勤仓储间",
+    "清洁工具间",
+    "维修工坊",
+    "校服教材周转库",
+    "后勤数字库存屏",
+    "冷链卸货位",
+    "厨余暂存冷藏箱",
+    "油烟净化设备",
+    "生活后勤洁污分流总图",
+    "生活后勤完整运营",
 ]
 
 
