@@ -71,8 +71,9 @@ The full campus scene includes:
 - Culture/arts/student center: black-box theater, small stage, choir and dance rehearsal, instrument and costume storage, gallery, ceramics studio, campus radio, TV studio, recording room, media editing, student union, club rooms, media release screen, display corridor, club fair plaza, culture wall, flag ceremony court, motto stone, and activity information screen.
 - Transport/accessibility operations: parent quick drop-off, waiting canopy, student queue buffer, visitor drop-off, bus canopy, shared-bike parking, pedestrian/bus/parent/bike/logistics/accessibility flow layers, accessible elevator entries, accessible toilet, tactile paving nodes, traffic guidance screens, parking availability display, flow detector, violation camera, logistics reservation terminal, and emergency vehicle staging.
 - MEP/building operations: power feeders, fiber ring, fire water, domestic water, chilled water, rainwater reuse, sewage drainage, kitchen gas line, electrical/low-voltage/plumbing risers, rooftop AHUs, smoke exhaust, kitchen exhaust, roof tank, fire pressure tank, elevator machine rooms, BMS sensors, utility-gallery environmental sensors, sump pump pit, and ventilation shaft.
+- Campus governance operations: integrated operations center, school-data dashboard, timetable/bell control, academic calendar board, class schedule screens, exam-security room, grade analytics, asset repair tickets, duty roster, patrol checkpoints, visitor/vehicle appointments, campus card and navigation terminals, health reporting, lab/venue/meeting reservations, dormitory late-return check-in, canteen staggered dining, family-school notice publishing, and cross-campus data bus.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 21 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 22 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 

@@ -1205,6 +1205,93 @@ def make_mep_utility_operations():
     cube("设施索引_机电管线楼宇运维", (-18, -15.6, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_campus_governance_operations():
+    # Campus governance layer: visible daily operation systems for schedule, service, duty, and data dispatch.
+    ops_center = (-31.5, -4.6)
+    cube("校园综合运营中心", (ops_center[0], ops_center[1], 1.0), (7.2, 4.4, 2.0), MATS["panel"], 0.12)
+    cube("校务数据中台大屏", (ops_center[0], ops_center[1] - 2.23, 1.45), (5.8, 0.12, 1.25), MATS["screen"], 0.035)
+    text(
+        "校务数据中台大屏_文字",
+        "校务运行：课表/考务/值班/报修/访客/宿舍/食堂/场馆",
+        (ops_center[0], ops_center[1] - 2.31, 1.55),
+        0.23,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("校园运行日报屏", (ops_center[0] - 2.7, ops_center[1] - 0.4, 1.55), (1.0, 0.18, 1.1), MATS["screen"], 0.03)
+    cube("值班排班看板", (ops_center[0] - 1.35, ops_center[1] - 0.4, 1.55), (1.0, 0.18, 1.1), MATS["screen"], 0.03)
+    cube("资产报修工单屏", (ops_center[0], ops_center[1] - 0.4, 1.55), (1.0, 0.18, 1.1), MATS["screen"], 0.03)
+    cube("校园广播分区矩阵", (ops_center[0] + 1.35, ops_center[1] - 0.4, 1.55), (1.0, 0.18, 1.1), MATS["screen"], 0.03)
+    cube("移动巡检PDA充电柜", (ops_center[0] + 2.7, ops_center[1] - 0.4, 0.95), (1.0, 0.36, 0.8), MATS["metal"], 0.035)
+
+    schedule_nodes = [
+        ("课表铃声控制器", -15, 4.2, MATS["yellow"]),
+        ("电子校历活动看板", -4, -34.5, MATS["screen"]),
+        ("班级课表同步屏_T01", -39, 7.7, MATS["screen"]),
+        ("班级课表同步屏_T02", -12, 15.7, MATS["screen"]),
+        ("班级课表同步屏_T03", 15, 15.7, MATS["screen"]),
+        ("教务排课服务器", -36, -20.2, MATS["blue"]),
+        ("考试考务保密室", -4.8, -21.5, MATS["panel"]),
+        ("试卷流转保险柜", -2.8, -21.5, MATS["metal"]),
+        ("成绩与学情分析屏", 1.2, -21.5, MATS["screen"]),
+    ]
+    service_nodes = [
+        ("访客预约二维码闸机", -3.5, -52.8, MATS["screen"]),
+        ("车辆预约白名单终端", 9.5, -52.3, MATS["screen"]),
+        ("校园一卡通充值终端", -8.5, -49.5, MATS["screen"]),
+        ("校内导航触摸屏", 4.5, -49.5, MATS["screen"]),
+        ("家校通知发布屏", -18, -53.0, MATS["screen"]),
+        ("晨检午检健康上报终端", -22.5, 8.4, MATS["green"]),
+        ("实验室预约与危化品审批屏", -24.5, -16.8, MATS["screen"]),
+        ("体育场地预约屏", 52, 5.4, MATS["screen"]),
+        ("食堂错峰就餐调度屏", 28, 24.6, MATS["screen"]),
+        ("宿舍晚归点名终端", 48.5, 24.6, MATS["screen"]),
+        ("会议室预约门牌_行政", 4.5, -19.0, MATS["screen"]),
+        ("师生服务中心窗口", -9.8, -21.5, MATS["stone"]),
+    ]
+    all_nodes = schedule_nodes + service_nodes
+    for name, x, y, material in all_nodes:
+        cube(name, (x, y, 1.2), (1.35, 0.7, 1.25), material, 0.045)
+        cube(f"设施索引_{name}", (x, y, 0.35), (0.58, 0.58, 0.34), MATS["orange"], 0.02)
+
+    route_targets = [
+        ("校务数据总线_到教学区", ops_center[0], ops_center[1], -12, 12, MATS["blue"]),
+        ("校务数据总线_到入口服务", ops_center[0], ops_center[1], -3.5, -52.8, MATS["blue"]),
+        ("校务数据总线_到食堂", ops_center[0], ops_center[1], 28, 24.6, MATS["blue"]),
+        ("校务数据总线_到宿舍", ops_center[0], ops_center[1], 48.5, 24.6, MATS["blue"]),
+        ("校务数据总线_到体育馆", ops_center[0], ops_center[1], 52, 5.4, MATS["blue"]),
+        ("校务数据总线_到实验室", ops_center[0], ops_center[1], -24.5, -16.8, MATS["blue"]),
+        ("校务数据总线_到行政考务", ops_center[0], ops_center[1], -4.8, -21.5, MATS["blue"]),
+    ]
+    for name, x1, y1, x2, y2, material in route_targets:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, 0.12), (length, 0.13, 0.07), material, 0.006, rot_z=angle)
+
+    duty_points = [
+        ("行政值班巡检点", -5, -18),
+        ("教学楼值班巡检点", -12, 12),
+        ("食堂值班巡检点", 30, 31),
+        ("宿舍值班巡检点", 54, 31),
+        ("体育馆值班巡检点", 55, 11),
+        ("校门值班巡检点", -14, -53.2),
+    ]
+    for i, (name, x, y) in enumerate(duty_points):
+        cyl(name, (x, y, 0.6), 0.38, 1.0, MATS["orange"], vertices=18, bevel=True)
+        text(f"{name}_编号", f"D{i + 1}", (x, y, 1.18), 0.38, MATS["white"])
+
+    cube("校园治理运行总览牌", (-46, -2.4, 1.35), (18, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "校园治理运行总览牌_文字",
+        "治理运营：校历课表、值班巡检、报修工单、预约审批、家校通知、运行日报",
+        (-46, -2.65, 1.42),
+        0.28,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_校园治理运行中枢", (-46, -2.4, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1288,6 +1375,7 @@ PREVIEW_VIEWS = [
     ("19_文化艺术社团公共学习", (52, -58, 24), (12, -27, 3), 30),
     ("20_交通到达无障碍运营", (40, -80, 23), (5, -50, 2), 28),
     ("21_机电管线楼宇运维", (72, 62, 34), (0, 6, 1), 28),
+    ("22_校园治理运行中枢", (-76, -34, 24), (-25, -9, 2), 28),
 ]
 
 
@@ -1363,6 +1451,7 @@ def build_scene():
     make_culture_arts_student_center()
     make_transport_accessibility_operations()
     make_mep_utility_operations()
+    make_campus_governance_operations()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
