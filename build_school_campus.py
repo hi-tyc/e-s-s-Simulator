@@ -353,6 +353,81 @@ def make_fangshan_high_fidelity_public_details():
     cube("设施索引_南外方山高相似公开细化层", (62, 44, 2.42), (1.0, 1.0, 0.42), MATS["orange"], 0.01)
 
 
+def make_fangshan_program_courtyard_details():
+    # Third-pass public-detail layer: visible curriculum, courtyard-arch, arts, science, and residential-college cues from public pages.
+    arch_specs = [
+        ("高中院落庭院拱", -12, 18.9, 0),
+        ("国际部院落庭院拱", 14, 18.9, 0),
+        ("初中院落庭院拱", -38, 10.9, 0),
+        ("小学共享院落庭院拱", 40, 10.9, 0),
+        ("入口艺苑连续庭院拱_西", -10.5, -49.0, math.radians(18)),
+        ("入口艺苑连续庭院拱_东", 10.5, -49.0, math.radians(-18)),
+    ]
+    for name, x, y, rot in arch_specs:
+        cube(f"南外方山公开课程庭院细节_{name}_左拱脚", (x - 1.15, y, 1.25), (0.34, 0.34, 2.5), MATS["brick"], 0.01, rot_z=rot)
+        cube(f"南外方山公开课程庭院细节_{name}_右拱脚", (x + 1.15, y, 1.25), (0.34, 0.34, 2.5), MATS["brick"], 0.01, rot_z=rot)
+        cube(f"南外方山公开课程庭院细节_{name}_拱券梁", (x, y, 2.62), (2.65, 0.34, 0.38), MATS["brick"], 0.01, rot_z=rot)
+        cyl(f"南外方山公开课程庭院细节_{name}_半圆拱心", (x, y - 0.02, 2.46), 0.52, 0.12, MATS["stone"], vertices=16, rot=(math.radians(90), 0, rot))
+
+    curriculum_rooms = [
+        ("A-Level课程教室", 10.6, 13.8, MATS["blue"]),
+        ("AP课程教室", 14.0, 13.8, MATS["purple"]),
+        ("OSSD课程教室", 17.4, 13.8, MATS["green"]),
+        ("国际升学指导中心", 20.8, 13.8, MATS["screen"]),
+        ("英语戏剧黑盒", 17.4, 9.5, MATS["purple"]),
+        ("跨文化项目展示墙", 10.6, 9.5, MATS["orange"]),
+    ]
+    for name, x, y, material in curriculum_rooms:
+        cube(f"南外方山公开课程庭院细节_{name}_房间牌", (x, y, 3.18), (2.25, 0.16, 0.68), material, 0.01)
+        cube(f"南外方山公开课程庭院细节_{name}_室内桌组", (x, y - 0.55, 2.82), (1.55, 0.72, 0.18), MATS["white"], 0.006)
+        cube(f"南外方山公开课程庭院细节_{name}_教学屏", (x, y + 0.72, 3.05), (1.3, 0.08, 0.72), MATS["screen"], 0.006)
+
+    arts_science_nodes = [
+        ("美育中心_画室天窗", 23.0, -26.4, MATS["orange"]),
+        ("美育中心_舞蹈排练镜墙", 26.4, -26.4, MATS["purple"]),
+        ("美育中心_音乐排练琴房", 29.8, -26.4, MATS["wood"]),
+        ("科学竞赛实验室_物理", -27.8, -26.0, MATS["blue"]),
+        ("科学竞赛实验室_化学", -23.0, -26.0, MATS["green"]),
+        ("科学竞赛实验室_生物", -18.2, -26.0, MATS["purple"]),
+    ]
+    for name, x, y, material in arts_science_nodes:
+        cube(f"南外方山公开课程庭院细节_{name}_功能盒", (x, y, 2.7), (2.45, 1.35, 0.8), material, 0.015)
+        cube(f"南外方山公开课程庭院细节_{name}_开放展示面", (x, y - 0.72, 2.75), (1.8, 0.08, 0.68), MATS["glass"], 0.006)
+
+    houses = [
+        ("宿舍学院制_House_A", 47.0, 33.8, MATS["blue"]),
+        ("宿舍学院制_House_B", 52.0, 33.8, MATS["green"]),
+        ("宿舍学院制_House_C", 57.0, 33.8, MATS["purple"]),
+        ("宿舍学院制_House_D", 62.0, 33.8, MATS["orange"]),
+    ]
+    for name, x, y, material in houses:
+        cube(f"南外方山公开课程庭院细节_{name}_学院客厅", (x, y, 6.92), (3.6, 2.2, 0.22), material, 0.01)
+        cube(f"南外方山公开课程庭院细节_{name}_公告板", (x, y + 1.18, 7.4), (2.5, 0.08, 0.72), MATS["screen"], 0.006)
+        cube(f"南外方山公开课程庭院细节_{name}_共享长桌", (x, y, 7.15), (2.2, 0.72, 0.14), MATS["wood"], 0.006)
+
+    division_curriculum = [
+        ("小学部_美育活动课程", 40, -5.2, MATS["yellow"]),
+        ("初中部_科创拓展课程", -38, -5.2, MATS["blue"]),
+        ("高中部_竞赛拔尖课程", -12, 2.6, MATS["purple"]),
+        ("国际高中部_国际课程路径", 14, 2.6, MATS["green"]),
+    ]
+    for name, x, y, material in division_curriculum:
+        cube(f"南外方山公开课程庭院细节_{name}_课程地图", (x, y, 1.22), (6.2, 0.32, 1.46), MATS["panel"], 0.015)
+        cube(f"南外方山公开课程庭院细节_{name}_课程色带", (x, y - 0.2, 1.68), (5.3, 0.08, 0.18), material, 0.004)
+        text(f"南外方山公开课程庭院细节_{name}_文字", name, (x, y - 0.25, 1.2), 0.24, MATS["white"], rot=(math.radians(90), 0, 0))
+
+    cube("南外方山公开课程庭院细节_公开依据索引牌", (-62, 43.2, 1.3), (22.0, 0.36, 1.8), MATS["panel"], 0.02)
+    text(
+        "南外方山公开课程庭院细节_公开依据索引牌_文字",
+        "三轮细化：庭院拱/国际课程A-Level AP OSSD/美育中心/科学竞赛/宿舍学院制/四学部课程地图",
+        (-62, 42.96, 1.36),
+        0.23,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_南外方山公开课程庭院细节层", (-62, 43.2, 2.44), (1.0, 1.0, 0.42), MATS["orange"], 0.01)
+
+
 def make_room_equipment(x, y, name):
     cube(f"{name} raised technical floor", (x, y, 0.18), (20, 12, 0.2), MATS["metal"], 0.04)
     cube(f"{name} room outline", (x, y, 1.2), (20.4, 12.4, 2.2), MATS["glass"], 0.04)
@@ -2055,6 +2130,7 @@ PREVIEW_VIEWS = [
     ("29_游戏主教学楼导航交互", (-46, 32, 18), (-12, 12, 8), 40),
     ("30_南外方山公开资料复刻层", (82, -82, 54), (0, -4, 1), 30),
     ("31_南外方山高相似公开细化", (72, 62, 36), (2, 16, 2), 32),
+    ("32_南外方山公开课程庭院细节", (68, -68, 34), (2, -8, 3), 32),
 ]
 
 
@@ -2112,6 +2188,7 @@ def build_scene():
     make_academic_core()
     make_fangshan_public_reference_reconstruction()
     make_fangshan_high_fidelity_public_details()
+    make_fangshan_program_courtyard_details()
     make_technology_building()
     make_science_and_innovation_spaces()
     make_sports_and_living()
