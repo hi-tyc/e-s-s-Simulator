@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 20
+EXPECTED_PREVIEW_COUNT = 21
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -314,6 +314,29 @@ REQUIRED_KEYWORDS = [
     "应急车辆集结位",
     "交通到达无障碍总览牌",
     "交通到达无障碍运营",
+    "电力馈线",
+    "光纤环网",
+    "消防水管",
+    "生活给水管",
+    "冷冻水管",
+    "雨水回用管",
+    "污水排水管",
+    "食堂燃气管线",
+    "强电竖井",
+    "弱电竖井",
+    "给排水竖井",
+    "屋顶新风机组",
+    "屋顶排烟风机",
+    "厨房油烟排风井",
+    "屋顶水箱",
+    "屋顶消防稳压罐",
+    "电梯机房",
+    "BMS楼控传感器",
+    "管廊环境传感器",
+    "管廊排水泵坑",
+    "管廊通风井",
+    "机电管线楼宇运维总览牌",
+    "机电管线楼宇运维",
 ]
 
 
