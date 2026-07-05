@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 26
+EXPECTED_PREVIEW_COUNT = 28
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -469,6 +469,49 @@ REQUIRED_KEYWORDS = [
     "安全日志回传链路",
     "无线网络边缘计算总览牌",
     "无线网络边缘计算",
+    "完整室内_保安室",
+    "完整室内_图书馆行政中心",
+    "完整室内_STEM中心",
+    "完整室内_博雅中心",
+    "完整室内_初中教学组团",
+    "完整室内_高中教学组团",
+    "完整室内_国际部教学组团",
+    "完整室内_小学共享教室组团",
+    "完整室内_科技运维楼",
+    "完整室内_室内体育馆",
+    "完整室内_食堂",
+    "完整室内_宿舍生活组团",
+    "完整室内_医务心理中心",
+    "完整室内_外语国际交流中心",
+    "主走廊",
+    "家具设备",
+    "全建筑室内详图覆盖总览牌",
+    "全建筑室内详图覆盖",
+    "游戏主教学楼",
+    "游戏主教学楼_1F",
+    "游戏主教学楼_2F",
+    "游戏主教学楼_3F",
+    "游戏主教学楼_4F",
+    "宽走廊景深",
+    "厕所景深空间",
+    "男厕隔间区",
+    "女厕隔间区",
+    "无障碍卫生间",
+    "洗手台",
+    "镜面",
+    "西楼梯",
+    "东楼梯",
+    "电梯厅",
+    "电梯门",
+    "教室详细布景",
+    "智慧黑板",
+    "电子班牌",
+    "课桌椅",
+    "走廊储物柜",
+    "消防栓",
+    "逃生指示",
+    "四层剖面主场景总览牌",
+    "游戏主教学楼_四层详细室内",
 ]
 
 

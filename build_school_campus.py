@@ -1631,6 +1631,120 @@ def make_wireless_edge_network_operations():
     cube("设施索引_无线网络边缘计算", (-48, -15.2, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_complete_building_interiors():
+    # Requirement layer: every major building in the map receives a visible interior program, not just an exterior mass.
+    def room(name, x, y, z, w, d, material, label_size=0.22):
+        cube(name, (x, y, z), (w, d, 0.14), material, 0.025)
+        cube(f"{name}_家具设备", (x, y, z + 0.22), (w * 0.55, d * 0.18, 0.18), MATS["wood"], 0.012)
+        text(f"{name}_标签", name.replace("完整室内_", ""), (x, y, z + 0.48), label_size, MATS["white"])
+
+    building_specs = [
+        ("保安室", -14, -53.2, 3.28, [("值班桌", -15.4, -53.8, MATS["wood"]), ("访客登记", -14, -53.8, MATS["screen"]), ("警械装备柜", -12.6, -53.8, MATS["metal"]), ("快递暂存", -14, -52.1, MATS["stone"])]),
+        ("图书馆行政中心", 0, -21, 7.25, [("总服务台", -4.8, -22.8, MATS["wood"]), ("外文书库", -1.6, -22.8, MATS["blue"]), ("自习舱", 1.6, -22.8, MATS["white"]), ("行政会议室", 4.8, -22.8, MATS["green"])]),
+        ("STEM中心", -23, -24, 6.65, [("物理准备室", -26.9, -25.8, MATS["blue"]), ("化学准备室", -24.3, -25.8, MATS["green"]), ("生物准备室", -21.7, -25.8, MATS["purple"]), ("创客工具墙", -19.1, -25.8, MATS["orange"])]),
+        ("博雅中心", 23, -24, 6.65, [("语言教研室", 19.1, -25.8, MATS["blue"]), ("录播教室", 21.7, -25.8, MATS["screen"]), ("报告厅后台", 24.3, -25.8, MATS["metal"]), ("艺术讨论室", 26.9, -25.8, MATS["purple"])]),
+        ("初中教学组团", -38, 4, 6.35, [("班级教室", -42.6, 2.1, MATS["white"]), ("教师办公室", -39.4, 2.1, MATS["wood"]), ("年级活动角", -36.2, 2.1, MATS["green"]), ("卫生间茶水", -33.0, 2.1, MATS["water"])]),
+        ("高中教学组团", -12, 12, 6.35, [("选科教室", -16.6, 10.1, MATS["white"]), ("导师答疑室", -13.4, 10.1, MATS["wood"]), ("竞赛讨论室", -10.2, 10.1, MATS["purple"]), ("学科资料间", -7.0, 10.1, MATS["stone"])]),
+        ("国际部教学组团", 14, 12, 6.35, [("国际课程教室", 9.4, 10.1, MATS["white"]), ("外教备课室", 12.6, 10.1, MATS["wood"]), ("申请辅导室", 15.8, 10.1, MATS["screen"]), ("跨文化讨论区", 19.0, 10.1, MATS["green"])]),
+        ("小学共享教室组团", 40, 4, 6.35, [("共享教室", 35.4, 2.1, MATS["white"]), ("阅读角", 38.6, 2.1, MATS["wood"]), ("项目学习区", 41.8, 2.1, MATS["green"]), ("教师看护点", 45.0, 2.1, MATS["stone"])]),
+        ("科技运维楼", -48, -21, 5.55, [("冷通道机柜", -54.8, -20.0, MATS["panel"]), ("网络运维席", -51.6, -20.0, MATS["screen"]), ("UPS电池间", -48.4, -20.0, MATS["yellow"]), ("备件库", -45.2, -20.0, MATS["metal"])]),
+        ("室内体育馆", 55, 11, 8.85, [("器材库", 49.8, 8.0, MATS["metal"]), ("男女更衣", 53.2, 8.0, MATS["white"]), ("赛事控制室", 56.6, 8.0, MATS["screen"]), ("医务裁判室", 60.0, 8.0, MATS["red"])]),
+        ("食堂", 30, 31, 5.65, [("学生餐厅", 24.6, 29.5, MATS["wood"]), ("教工餐厅", 28.2, 29.5, MATS["stone"]), ("明厨亮灶", 31.8, 29.5, MATS["screen"]), ("洗消回收", 35.4, 29.5, MATS["green"])]),
+        ("宿舍生活组团", 54, 31, 7.35, [("宿舍房间", 48.6, 30.0, MATS["white"]), ("公共自习", 52.2, 30.0, MATS["wood"]), ("洗衣淋浴", 55.8, 30.0, MATS["water"]), ("宿管值班", 59.4, 30.0, MATS["screen"])]),
+        ("医务心理中心", 12, 32, 4.75, [("诊室", 8.8, 30.6, MATS["white"]), ("观察室", 11.0, 30.6, MATS["water"]), ("心理沙盘室", 13.2, 30.6, MATS["wood"]), ("团辅室", 15.4, 30.6, MATS["green"])]),
+        ("外语国际交流中心", 18.5, -17.8, 3.25, [("同传控制间", 14.0, -18.9, MATS["screen"]), ("模联圆桌", 17.0, -18.9, MATS["green"]), ("外事接待", 20.0, -18.9, MATS["stone"]), ("机考监考", 23.0, -18.9, MATS["blue"])]),
+    ]
+
+    for building_name, cx, cy, z, spaces in building_specs:
+        cube(f"完整室内_{building_name}_楼层底图", (cx, cy, z), (9.8, 5.2, 0.08), MATS["glass"], 0.025)
+        cube(f"完整室内_{building_name}_主走廊", (cx, cy, z + 0.1), (8.6, 0.45, 0.08), MATS["paving"], 0.012)
+        for item_name, x, y, material in spaces:
+            room(f"完整室内_{building_name}_{item_name}", x, y, z + 0.18, 2.15, 1.25, material)
+        cube(f"设施索引_完整室内_{building_name}", (cx, cy, z + 0.72), (0.78, 0.78, 0.32), MATS["orange"], 0.02)
+
+    cube("全建筑室内详图覆盖总览牌", (0, 36.8, 1.35), (42, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "全建筑室内详图覆盖总览牌_文字",
+        "室内覆盖：保安/图书行政/STEM/博雅/四组教学/科技运维/体育馆/食堂/宿舍/医务心理/外语中心均含室内功能",
+        (0, 36.55, 1.42),
+        0.28,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_全建筑室内详图覆盖", (0, 36.8, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
+def make_game_main_teaching_building_detail():
+    # Main gameplay building: a detailed four-floor teaching block with corridor depth, toilets, stairs, and classroom props.
+    cx, cy = -12, 12
+    floor_z = [6.9, 8.65, 10.4, 12.15]
+    floor_names = ["1F公共大厅", "2F标准教室层", "3F选科教室层", "4F社团备课层"]
+    for floor_idx, z in enumerate(floor_z):
+        level = floor_idx + 1
+        cube(f"游戏主教学楼_{level}F_整层楼板", (cx, cy, z), (18.8, 13.2, 0.12), MATS["stone"], 0.035)
+        cube(f"游戏主教学楼_{level}F_宽走廊景深", (cx, cy, z + 0.18), (16.6, 2.15, 0.12), MATS["paving"], 0.025)
+        cube(f"游戏主教学楼_{level}F_走廊北侧玻璃栏", (cx, cy + 1.12, z + 0.72), (16.4, 0.08, 0.95), MATS["glass"], 0.015)
+        cube(f"游戏主教学楼_{level}F_走廊南侧展板墙", (cx, cy - 1.12, z + 0.72), (16.4, 0.1, 0.95), MATS["panel"], 0.015)
+        text(f"游戏主教学楼_{level}F_楼层导视", f"T02 {floor_names[floor_idx]}", (cx - 7.3, cy - 1.22, z + 1.02), 0.24, MATS["light"], rot=(math.radians(90), 0, 0))
+        for x in [-18.6, -15.8, -8.2, -5.4]:
+            cube(f"游戏主教学楼_{level}F_走廊储物柜_{x}", (x, cy - 0.82, z + 0.52), (0.82, 0.18, 0.72), MATS["metal"], 0.012)
+        for x in [-19.5, -4.5]:
+            cube(f"游戏主教学楼_{level}F_消防栓_{x}", (x, cy + 0.96, z + 0.55), (0.38, 0.12, 0.56), MATS["red"], 0.012)
+            cube(f"游戏主教学楼_{level}F_逃生指示_{x}", (x + 0.55, cy + 0.96, z + 0.95), (0.52, 0.08, 0.22), MATS["light"], 0.008)
+
+        # Vertical circulation cores remain aligned through all floors.
+        for stair_name, sx in [("西楼梯", cx - 8.2), ("东楼梯", cx + 8.2)]:
+            cube(f"游戏主教学楼_{level}F_{stair_name}_楼梯间", (sx, cy, z + 0.45), (1.55, 2.15, 0.9), MATS["metal"], 0.025)
+            for step in range(5):
+                cube(f"游戏主教学楼_{level}F_{stair_name}_踏步_{step}", (sx, cy - 0.72 + step * 0.32, z + 0.18 + step * 0.08), (1.25, 0.18, 0.08), MATS["stone"], 0.006)
+        cube(f"游戏主教学楼_{level}F_电梯厅", (cx + 6.3, cy, z + 0.48), (1.35, 1.65, 0.95), MATS["metal"], 0.025)
+        cube(f"游戏主教学楼_{level}F_电梯门", (cx + 6.3, cy - 0.86, z + 0.55), (0.86, 0.08, 0.75), MATS["screen"], 0.012)
+
+        toilet_x = cx + 7.9
+        cube(f"游戏主教学楼_{level}F_厕所景深空间", (toilet_x, cy + 4.05, z + 0.2), (3.0, 2.25, 0.12), MATS["white"], 0.02)
+        cube(f"游戏主教学楼_{level}F_男厕隔间区", (toilet_x - 0.78, cy + 4.28, z + 0.52), (1.1, 0.9, 0.56), MATS["blue"], 0.012)
+        cube(f"游戏主教学楼_{level}F_女厕隔间区", (toilet_x + 0.78, cy + 4.28, z + 0.52), (1.1, 0.9, 0.56), MATS["purple"], 0.012)
+        cube(f"游戏主教学楼_{level}F_无障碍卫生间", (toilet_x, cy + 3.2, z + 0.52), (1.0, 0.72, 0.56), MATS["green"], 0.012)
+        for i, ox in enumerate([-1.05, -0.55, 0.55, 1.05]):
+            cube(f"游戏主教学楼_{level}F_洗手台_{i}", (toilet_x + ox, cy + 2.75, z + 0.38), (0.42, 0.28, 0.22), MATS["water"], 0.008)
+            cube(f"游戏主教学楼_{level}F_镜面_{i}", (toilet_x + ox, cy + 2.58, z + 0.74), (0.38, 0.04, 0.38), MATS["glass"], 0.004)
+
+        room_defs = [
+            ("北侧A教室", cx - 5.7, cy + 4.0, MATS["white"]),
+            ("北侧B教室", cx - 1.7, cy + 4.0, MATS["white"]),
+            ("南侧A教室", cx - 5.7, cy - 4.0, MATS["white"]),
+            ("南侧B教室", cx - 1.7, cy - 4.0, MATS["white"]),
+        ]
+        if level == 1:
+            room_defs = [("门厅接待", cx - 5.7, cy + 4.0, MATS["stone"]), ("学生储物大厅", cx - 1.7, cy + 4.0, MATS["metal"]), ("年级公告厅", cx - 5.7, cy - 4.0, MATS["screen"]), ("开放讨论区", cx - 1.7, cy - 4.0, MATS["wood"])]
+        elif level == 3:
+            room_defs = [("物理选科教室", cx - 5.7, cy + 4.0, MATS["blue"]), ("历史选科教室", cx - 1.7, cy + 4.0, MATS["wood"]), ("导师办公室", cx - 5.7, cy - 4.0, MATS["green"]), ("学科讨论室", cx - 1.7, cy - 4.0, MATS["purple"])]
+        elif level == 4:
+            room_defs = [("社团活动教室", cx - 5.7, cy + 4.0, MATS["orange"]), ("备课资料室", cx - 1.7, cy + 4.0, MATS["wood"]), ("小型录播室", cx - 5.7, cy - 4.0, MATS["screen"]), ("屋顶设备检修间", cx - 1.7, cy - 4.0, MATS["metal"])]
+
+        for room_idx, (room_name, rx, ry, material) in enumerate(room_defs):
+            cube(f"游戏主教学楼_{level}F_{room_name}_教室详细布景", (rx, ry, z + 0.22), (3.35, 2.3, 0.12), material, 0.02)
+            cube(f"游戏主教学楼_{level}F_{room_name}_智慧黑板", (rx, ry + (1.18 if ry < cy else -1.18), z + 0.86), (2.1, 0.08, 0.64), MATS["screen"], 0.01)
+            cube(f"游戏主教学楼_{level}F_{room_name}_讲台", (rx, ry + (0.72 if ry < cy else -0.72), z + 0.42), (1.15, 0.38, 0.18), MATS["wood"], 0.01)
+            cube(f"游戏主教学楼_{level}F_{room_name}_电子班牌", (rx - 1.85, cy + (1.18 if ry > cy else -1.18), z + 0.82), (0.42, 0.08, 0.28), MATS["screen"], 0.006)
+            for row in range(3):
+                for col in range(3):
+                    cube(f"游戏主教学楼_{level}F_{room_name}_课桌椅_{row}_{col}", (rx - 0.9 + col * 0.9, ry - 0.45 + row * 0.42, z + 0.42), (0.48, 0.28, 0.16), MATS["wood"], 0.008)
+            for wx in [-1.35, 0, 1.35]:
+                cube(f"游戏主教学楼_{level}F_{room_name}_外窗_{wx}", (rx + wx, ry + (1.22 if ry > cy else -1.22), z + 0.9), (0.72, 0.05, 0.5), MATS["glass"], 0.006)
+
+    cube("游戏主教学楼_四层剖面主场景总览牌", (cx, cy + 8.0, 1.35), (26, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "游戏主教学楼_四层剖面主场景总览牌_文字",
+        "主场景教学楼：四层、宽走廊景深、厕所隔间/洗手台、楼梯电梯、教室布景、储物柜、消防与导视",
+        (cx, cy + 7.75, 1.42),
+        0.28,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_游戏主教学楼_四层详细室内", (cx, cy + 8.0, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1719,6 +1833,8 @@ PREVIEW_VIEWS = [
     ("24_校外周边市政界面", (48, -92, 24), (0, -61, 1), 28),
     ("25_夜间天气韧性运行", (62, -74, 25), (6, -32, 2), 28),
     ("26_无线网络边缘计算", (-82, -42, 24), (-30, -14, 2), 28),
+    ("27_全建筑室内详图覆盖", (76, 48, 30), (16, 12, 5), 30),
+    ("28_游戏主教学楼四层室内", (32, 42, 22), (-12, 12, 9), 34),
 ]
 
 
@@ -1799,6 +1915,8 @@ def build_scene():
     make_surrounding_city_interface()
     make_night_weather_resilience_operations()
     make_wireless_edge_network_operations()
+    make_complete_building_interiors()
+    make_game_main_teaching_building_detail()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
