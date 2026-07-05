@@ -54,6 +54,11 @@ def init_materials():
             "orange": mat("orange wayfinding accent", (0.88, 0.34, 0.08, 1), 0.52),
             "blue": mat("network blue", (0.03, 0.2, 0.78, 1), 0.44),
             "purple": mat("science purple", (0.34, 0.22, 0.55, 1), 0.55),
+            "green": mat("laboratory safety green", (0.1, 0.55, 0.32, 1), 0.55),
+            "red": mat("fire safety red", (0.72, 0.04, 0.03, 1), 0.48),
+            "solar": mat("blue black solar glass", (0.01, 0.035, 0.08, 1), 0.18, emission=(0.0, 0.04, 0.08, 1), strength=0.15),
+            "parking": mat("parking line white", (0.93, 0.93, 0.86, 1), 0.55),
+            "wetland": mat("rain garden wetland", (0.08, 0.28, 0.2, 1), 0.8),
             "tree": mat("campus tree canopy", (0.04, 0.34, 0.12, 1), 0.7),
             "trunk": mat("tree trunk bark", (0.38, 0.22, 0.1, 1), 0.8),
             "light": mat("warm architectural light", (1, 0.92, 0.7, 1), 0.2, emission=(1, 0.82, 0.46, 1), strength=1.0),
@@ -235,6 +240,69 @@ def make_technology_building():
     text("backbone label", "蓝=校园光纤 / 黄=电力主干", (-18, -10.2, 0.12), 0.65, MATS["white"])
 
 
+def make_science_and_innovation_spaces():
+    # STEM building exposed program bands.
+    lab_specs = [
+        ("物理实验室", -27.8, -29.4, MATS["blue"]),
+        ("化学实验室", -23.0, -29.4, MATS["green"]),
+        ("生物实验室", -18.2, -29.4, MATS["purple"]),
+        ("AI创客工坊", -27.8, -18.8, MATS["orange"]),
+        ("VR沉浸教室", -23.0, -18.8, MATS["screen"]),
+        ("机器人社团", -18.2, -18.8, MATS["yellow"]),
+    ]
+    for name, x, y, color in lab_specs:
+        cube(f"设施索引_{name}", (x, y, 0.36), (1.0, 1.0, 0.58), color, 0.04)
+        cube(f"{name} glass lab bay", (x, y, 1.1), (4.0, 3.0, 1.8), MATS["glass"], 0.04)
+        cube(f"{name} lab bench", (x, y, 0.86), (2.7, 0.62, 0.12), MATS["white"], 0.03)
+        cube(f"{name} equipment wall", (x, y + 1.36, 1.25), (2.8, 0.12, 1.0), color, 0.02)
+        text(f"{name} label", name, (x, y, 2.15), 0.38, MATS["white"])
+    for i, x in enumerate([-29.2, -26.3, -23.4, -20.5, -17.6]):
+        cyl(f"STEM roof observatory telescope {i}", (x, -24, 5.25), 0.09, 1.1, MATS["metal"], vertices=18, rot=(0, math.radians(70), 0))
+    cube("设施索引_报告厅", (23, -16, 0.36), (1.0, 1.0, 0.58), MATS["orange"], 0.04)
+    cube("auditorium stepped seating block", (23, -16, 0.55), (11.5, 5.5, 0.7), MATS["brick"], 0.08)
+    for i in range(5):
+        cube(f"auditorium seating tier {i}", (23, -18 + i * 0.85, 0.75 + i * 0.08), (10.8, 0.28, 0.12), MATS["orange"], 0.02)
+    cube("auditorium presentation screen", (23, -12.9, 1.7), (6.2, 0.08, 1.6), MATS["screen"], 0.03)
+
+
+def make_transport_and_access():
+    cube("school bus dropoff lane", (-31, -55.4, 0.09), (38, 2.2, 0.08), MATS["road"], 0.04)
+    cube("设施索引_校车落客区", (-31, -55.4, 0.42), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
+    for i, x in enumerate([-43, -35, -27, -19]):
+        cube(f"school bus bay marking {i}", (x, -55.4, 0.16), (5.2, 0.1, 0.025), MATS["parking"], 0.004)
+        cube(f"school bus placeholder {i}", (x, -53.8, 0.72), (4.8, 1.25, 1.1), MATS["yellow"], 0.08)
+        cube(f"school bus windshield {i}", (x + 1.75, -53.1, 0.92), (0.6, 0.05, 0.45), MATS["glass"], 0.01)
+    cube("bike parking shelter roof", (31, -53.5, 2.1), (17, 3.5, 0.22), MATS["roof"], 0.06)
+    cube("设施索引_自行车停车棚", (31, -53.5, 0.42), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
+    for i, x in enumerate(range(24, 39, 2)):
+        cyl(f"bike parking rack {i}", (x, -53.5, 0.45), 0.08, 1.0, MATS["metal"], vertices=12, rot=(math.radians(90), 0, 0))
+    cube("accessible ramp at main gate", (9.5, -50.1, 0.12), (7.0, 1.6, 0.12), MATS["paving"], 0.04, rot_z=math.radians(-8))
+    cube("设施索引_无障碍坡道", (9.5, -50.1, 0.42), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
+    text("transport label", "校车落客 / 自行车棚 / 无障碍坡道", (0, -61.5, 0.15), 0.75, MATS["white"])
+
+
+def make_smart_safety_energy_systems():
+    for i, (x, y, w, d) in enumerate([(0, -21, 14, 7), (-23, -24, 11, 6), (55, 11, 18, 11), (54, 31, 22, 7)]):
+        for sx in [-0.35, 0, 0.35]:
+            cube(f"solar roof array {i}-{sx}", (x + sx * w, y, 5.75 if i != 2 else 7.75), (w * 0.24, d * 0.72, 0.08), MATS["solar"], 0.02)
+    cyl("rainwater collection tank north", (-72, 39, 1.0), 1.2, 2.0, MATS["water"], vertices=32, bevel=True)
+    cube("rain garden bioswale", (-46, 41, 0.08), (38, 3.2, 0.08), MATS["wetland"], 0.08)
+    text("sponge campus label", "海绵校园：雨水花园 / 回收水罐 / 太阳能屋顶", (-46, 43.3, 0.18), 0.6, MATS["white"])
+    for i, (x, y) in enumerate([(-40, 20), (-12, 27), (14, 27), (41, 20), (0, -31), (52, -1), (54, 23)]):
+        cube(f"fire hydrant cabinet {i}", (x, y, 0.55), (0.55, 0.28, 1.05), MATS["red"], 0.03)
+        cyl(f"fire hydrant hose reel {i}", (x, y - 0.16, 0.7), 0.18, 0.035, MATS["white"], vertices=24, rot=(math.radians(90), 0, 0))
+    for i, (x1, y1, x2, y2) in enumerate([(-38, 4, -22, -6), (-12, 12, 0, -2), (14, 12, 0, -2), (40, 4, 23, -6), (55, 11, 45, -28)]):
+        cube(f"evacuation route arrow body {i}", ((x1 + x2) / 2, (y1 + y2) / 2, 0.2), (abs(x2 - x1) + 0.8, 0.24, 0.05), MATS["red"], 0.01, rot_z=math.atan2(y2 - y1, x2 - x1))
+        cyl(f"evacuation route arrow head {i}", (x2, y2, 0.24), 0.42, 0.08, MATS["red"], vertices=3, rot=(0, 0, math.atan2(y2 - y1, x2 - x1) - math.pi / 2))
+    cube("campus broadcast control cabinet", (-36, -2.5, 0.72), (1.0, 0.7, 1.2), MATS["panel"], 0.04)
+    for i, (x, y) in enumerate([(-30, -15), (0, -15), (30, -15), (-20, 18), (20, 18), (50, -35)]):
+        cyl(f"campus broadcast speaker pole {i}", (x, y, 2.0), 0.055, 3.8, MATS["metal"], vertices=12)
+        cube(f"campus broadcast speaker {i}", (x, y + 0.32, 3.85), (0.65, 0.28, 0.35), MATS["white"], 0.04)
+    cube("campus digital twin operations screen", (-36, -13.05, 2.55), (8.6, 0.09, 0.52), MATS["screen"], 0.02)
+    cube("设施索引_数字孪生总控", (-36, -13.05, 3.05), (1.0, 0.2, 0.42), MATS["orange"], 0.03)
+    text("digital twin label", "数字孪生总控：安防/能耗/广播/消防/网络", (-36, -13.12, 2.92), 0.35, MATS["light"], rot=(math.radians(90), 0, 0))
+
+
 def make_sports_and_living():
     # Outdoor athletics
     cube("outdoor playground base", (45, -28, 0.06), (44, 26, 0.08), MATS["track"], 0.3)
@@ -335,6 +403,8 @@ PREVIEW_VIEWS = [
     ("04_教学院落和中心水景", (42, -30, 25), (-5, 4, 1), 26),
     ("05_操场和室内体育馆", (78, -62, 30), (45, -14, 1), 27),
     ("06_生活组团与后勤能源", (10, 66, 25), (18, 28, 1), 30),
+    ("07_STEM实验和创新空间", (-45, -44, 18), (-23, -24, 1), 30),
+    ("08_交通消防能源系统", (-74, -72, 26), (-24, -32, 1), 26),
 ]
 
 
@@ -392,8 +462,11 @@ def build_scene():
     make_gate_and_security()
     make_academic_core()
     make_technology_building()
+    make_science_and_innovation_spaces()
     make_sports_and_living()
     make_service_and_safety()
+    make_transport_and_access()
+    make_smart_safety_energy_systems()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
