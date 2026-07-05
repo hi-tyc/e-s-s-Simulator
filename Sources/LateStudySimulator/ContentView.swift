@@ -52,7 +52,7 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("开局制度参数")
+                Text("开局角色与制度参数")
                     .font(.system(size: 13, weight: .bold))
                 settingsPanel
             }
@@ -74,45 +74,140 @@ struct ContentView: View {
 
     private var topHUD: some View {
         HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("第 \(game.currentTurn)/\(game.maxTurns) 回合 · \(game.currentPhase.rawValue)")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("\(game.clockText) · \(game.currentPeriod.displayName) · \(game.viewMode.perspectiveDescription)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.68))
-                settingsPanel
-            }
-            .padding(10)
-            .liquidGlassPanel()
+            fixedParameterPanel
 
             Spacer()
 
-            VStack(spacing: 8) {
-                meter("心理能量", value: game.player.psychicEnergy, color: .green)
-                meter("视觉注意力", value: game.player.visualAttention, color: .mint)
-                meter("面具成本", value: game.player.maskCost, color: .purple)
-                meter("支持网络", value: game.player.support, color: .cyan)
-            }
-            .frame(width: 210)
-            .padding(10)
-            .liquidGlassPanel()
+            roleStatusPanel
 
-            VStack(spacing: 8) {
-                meter("压力", value: game.player.stress, color: .orange)
-                meter("暴露", value: game.player.exposure, color: .red)
-                meter("作业", value: game.player.homework, color: .blue)
-                meter("饥饿", value: game.player.hunger, color: .yellow)
-                meter("如厕", value: game.player.bladder, color: .teal)
-                Text("\(game.cameraPose.visionZone.rawValue) · \(game.cameraPose.visionZone.displayName)")
-                    .font(.system(size: 10, weight: .semibold))
+            dynamicVariablePanel
+        }
+    }
+
+    private var fixedParameterPanel: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: game.activeRole.icon)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(game.activeRole.isTeacher ? .purple : .cyan)
+                    .frame(width: 16)
+                Text("固定参数")
+                    .font(.system(size: 13, weight: .bold))
+                Spacer()
+                Text("第 \(game.currentTurn)/\(game.maxTurns)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.7))
-                Text("姿态 · \(game.player.posture.rawValue)")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(game.player.posture == .standing ? 0.95 : 0.62))
             }
-            .frame(width: 210)
-            .padding(10)
-            .liquidGlassPanel()
+            fixedParameterRow("角色", value: "\(game.activeRole.rawValue) · \(game.activeRole.roleType)")
+            fixedParameterRow("职责", value: game.activeRole.fixedDuty)
+            fixedParameterRow("学校KPI", value: "\(Int(game.settings.rankingPressure))")
+            fixedParameterRow("晚自习", value: "\(Int(game.settings.studyHours * 60)) 分钟 · \(game.currentPeriod.displayName)")
+            fixedParameterRow("交流规则", value: game.settings.allowsWhispering ? "允许低声交流" : "禁止交流")
+            fixedParameterRow("巡视要求", value: "\(Int(game.settings.patrolFrequency))")
+        }
+        .padding(10)
+        .frame(width: 250, alignment: .topLeading)
+        .liquidGlassPanel()
+    }
+
+    private func fixedParameterRow(_ title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 48, alignment: .leading)
+            Text(value)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var roleStatusPanel: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("\(game.clockText) · \(game.currentPhase.rawValue) · \(game.viewMode.perspectiveDescription)")
+                .font(.system(size: 12, weight: .bold))
+            Text(game.activeRole.shortDescription)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.64))
+                .fixedSize(horizontal: false, vertical: true)
+            if game.activeRole.isTeacher {
+                if let risk = game.highestRiskClassmate {
+                    Text("重点关注：\(risk.name) · \(risk.state.rawValue) · \(risk.riskReason)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange.opacity(0.88))
+                }
+                Text("教师变量不再使用学生的作业/饥饿作为核心胜负指标，重点看班级风险、信任、疲惫和咨询容量。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("\(game.cameraPose.visionZone.rawValue) · \(game.cameraPose.visionZone.displayName) · 姿态 \(game.player.posture.rawValue)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.cyan.opacity(0.84))
+                if game.freeRoam.isActive {
+                    Text("自由活动中 · 剩余 \(game.freeRoam.remainingSeconds)s · \(game.freeRoam.hasExitedClassroom ? "已到走廊" : "仍在教室")")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.mint.opacity(0.9))
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: 270, alignment: .topLeading)
+        .liquidGlassPanel()
+    }
+
+    private var dynamicVariablePanel: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("动态变量")
+                .font(.system(size: 13, weight: .bold))
+            if game.activeRole.isTeacher {
+                teacherDynamicMeters
+            } else {
+                studentDynamicMeters
+            }
+        }
+        .padding(10)
+        .frame(width: 230, alignment: .topLeading)
+        .liquidGlassPanel()
+    }
+
+    private var studentDynamicMeters: some View {
+        VStack(spacing: 8) {
+            meter("心理能量", value: game.player.psychicEnergy, color: .green)
+            meter("视觉注意力", value: game.player.visualAttention, color: .mint)
+            meter("面具成本", value: game.player.maskCost, color: .purple)
+            meter("支持网络", value: game.player.support, color: .cyan)
+            meter("压力", value: game.player.stress, color: .orange)
+            meter("暴露", value: game.player.exposure, color: .red)
+            meter("作业", value: game.player.homework, color: .blue)
+            meter("身体需求", value: max(game.player.hunger, game.player.bladder), color: .teal)
+        }
+    }
+
+    private var teacherDynamicMeters: some View {
+        VStack(spacing: 8) {
+            meter("疲惫指数", value: game.teacher.fatigue, color: .orange)
+            meter("制度压力", value: game.teacher.institutionalPressure, color: .red)
+            meter("表面秩序", value: game.teacher.classOrder, color: .blue)
+            meter("真实风险", value: game.teacher.classRisk, color: .red)
+            meter("误判风险", value: game.teacher.misreadRisk, color: .yellow)
+            meter("学生信任", value: game.teacher.studentTrust, color: .cyan)
+            meter("同理心", value: game.teacher.empathy, color: .mint)
+            meter("咨询容量", value: game.teacher.counselingCapacity, color: .green)
+            teacherCounterRow("提醒", value: game.teacher.studentsWarned, tint: .orange)
+            teacherCounterRow("关心", value: game.teacher.studentsHelped, tint: .cyan)
+        }
+    }
+
+    private func teacherCounterRow(_ title: String, value: Int, tint: Color) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+            Spacer()
+            Text("\(value)")
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(tint.opacity(0.9))
         }
     }
 
@@ -134,6 +229,38 @@ struct ContentView: View {
                     .buttonStyle(SegmentButtonStyle(isSelected: false))
                 }
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("可玩角色")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.72))
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(96), spacing: 6), count: 2), spacing: 6) {
+                    ForEach(PlayableRole.selectableCases) { role in
+                        Button {
+                            game.selectedRole = role
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: role.icon)
+                                    .font(.system(size: 13, weight: .bold))
+                                Text(role.rawValue)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .lineLimit(1)
+                                Text(role.roleType)
+                                    .font(.system(size: 8, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.58))
+                            }
+                            .frame(width: 88, height: 52)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: game.selectedRole == role))
+                        .help(role.shortDescription)
+                    }
+                }
+                Text(game.selectedRole.shortDescription)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .controlGlass()
 
             Toggle("允许低声交流", isOn: $game.settings.allowsWhispering)
                 .font(.system(size: 10, weight: .medium))
@@ -219,26 +346,14 @@ struct ContentView: View {
 
     private var modePanel: some View {
         HStack(alignment: .top, spacing: 12) {
-            Button {
-                game.toggleViewMode()
-            } label: {
-                Label(game.viewMode.rawValue, systemImage: game.viewMode == .student ? "person.fill" : "person.text.rectangle.fill")
-                    .frame(width: 128, height: 32)
-            }
-            .buttonStyle(SegmentButtonStyle(isSelected: game.viewMode == .teacher))
+            Label(game.activeRole.isTeacher ? "教师模式锁定" : "学生模式锁定", systemImage: game.activeRole.isTeacher ? "lock.fill" : "person.fill")
+                .font(.system(size: 12, weight: .bold))
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .liquidGlassPanel(tint: game.activeRole.isTeacher ? .purple.opacity(0.18) : .cyan.opacity(0.14))
 
-            if game.viewMode == .teacher {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("制度压力 \(Int(game.teacher.institutionalPressure)) · 疲惫 \(Int(game.teacher.fatigue)) · 已提醒 \(game.teacher.studentsWarned) · 已关心 \(game.teacher.studentsHelped)")
-                        .font(.system(size: 12, weight: .semibold))
-                    if let risk = game.highestRiskClassmate {
-                        Text("最高风险学生：\(risk.name) · \(risk.state.rawValue) · 压力 \(Int(risk.stress)) · \(risk.riskReason)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.72))
-                    }
-                }
-                .padding(10)
-                .liquidGlassPanel()
+            if game.activeRole.isTeacher {
+                teacherModeStrip
             } else {
                 deskmateStrip
             }
@@ -249,6 +364,74 @@ struct ContentView: View {
             eventStrip
         }
         .padding(.top, 10)
+    }
+
+    private var teacherModeStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("位置")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.68))
+                ForEach(TeacherLocation.allCases) { location in
+                    Button {
+                        game.setTeacherLocation(location)
+                    } label: {
+                        Image(systemName: location.icon)
+                            .frame(width: 26, height: 24)
+                    }
+                    .buttonStyle(SegmentButtonStyle(isSelected: game.teacher.location == location))
+                    .help(location.rawValue)
+                }
+                Text(game.teacher.location.rawValue)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.purple.opacity(0.86))
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("目标学生")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.68))
+                    if let target = game.selectedTeacherTarget {
+                        Text("\(target.name) · \(target.state.rawValue) · 压力 \(Int(target.stress)) · \(target.riskReason)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.orange.opacity(0.88))
+                    }
+                    Text(game.teacherFocusDescription)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(width: 230, alignment: .leading)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(game.teacherTargetCandidates) { mate in
+                            Button {
+                                game.selectTeacherTarget(mate.id)
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Text(mate.name)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .lineLimit(1)
+                                    Text("\(Int(mate.stress)) · \(mate.state.rawValue)")
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.64))
+                                }
+                                .frame(width: 72, height: 38)
+                            }
+                            .buttonStyle(SegmentButtonStyle(isSelected: game.selectedTeacherTargetID == mate.id))
+                            .help("\(mate.profile.traitLabel) · \(mate.riskReason)")
+                        }
+                    }
+                }
+                .frame(width: 330)
+            }
+        }
+        .padding(10)
+        .frame(width: 620, alignment: .topLeading)
+        .liquidGlassPanel()
     }
 
     private var deskmateStrip: some View {
@@ -513,6 +696,8 @@ struct ContentView: View {
             return "抬头看起来认真，但会消耗注意力；高压时可以短暂停留后切回前方。"
         case .left, .right:
             return "余光能确认同桌或过道信息，但转头本身会增加暴露；用完线索后及时收回视线。"
+        case .rear:
+            return "后方视野能确认门口和身后风险，但坐着回头非常显眼；除非必要，否则先用声音判断。"
         }
     }
 
@@ -647,22 +832,12 @@ struct ContentView: View {
 
     private var actionBar: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                ForEach(CameraPose.allCases, id: \.self) { pose in
-                    Button {
-                        game.setPose(pose)
-                    } label: {
-                        Text(pose.rawValue)
-                            .frame(width: 64, height: 28)
-                    }
-                    .buttonStyle(SegmentButtonStyle(isSelected: game.cameraPose == pose))
-                    .keyboardShortcut(KeyEquivalent(pose.shortcut), modifiers: [])
-                    .help("\(pose.rawValue) · \(String(pose.shortcut).uppercased())")
-                }
+            if game.activeRole.isTeacher == false {
+                studentControlHint
             }
 
             HStack(spacing: 10) {
-                if game.viewMode == .teacher {
+                if game.activeRole.isTeacher {
                     ForEach(TeacherAction.allCases) { action in
                         Button {
                             game.executeTeacherAction(action)
@@ -673,6 +848,11 @@ struct ContentView: View {
                         .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
                         .help("\(action.rawValue) · \(String(action.shortcut))")
                     }
+                } else if game.freeRoam.isActive {
+                    Text("自由活动中：拖动鼠标调整方向，空格前进，Shift 侧身；回座后继续晚自习。")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .frame(height: 58)
                 } else {
                     ForEach(PlayerAction.allCases) { action in
                         Button {
@@ -689,6 +869,43 @@ struct ContentView: View {
         }
         .padding(12)
         .liquidGlassPanel()
+    }
+
+    private var studentControlHint: some View {
+        HStack(spacing: 10) {
+            Label("按住画面拖动视角", systemImage: "cursorarrow.motionlines")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.cyan.opacity(0.88))
+            Text("\(game.cameraPose.rawValue) · \(game.cameraPose.visionZone.displayName)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+
+            if game.freeRoam.isActive {
+                Divider()
+                    .frame(height: 20)
+                    .overlay(.white.opacity(0.22))
+                Label("空格前进", systemImage: "keyboard.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.mint.opacity(0.9))
+                Label(game.freeRoam.isSideways ? "侧身中" : "Shift侧身", systemImage: "rectangle.compress.vertical")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(game.freeRoam.isSideways ? .orange.opacity(0.92) : .white.opacity(0.62))
+                Text("\(game.freeRoam.remainingSeconds)s")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.orange.opacity(0.92))
+                Button {
+                    game.returnToSeatFromFreeRoam()
+                } label: {
+                    Label("回座", systemImage: "chair.fill")
+                        .frame(width: 76, height: 28)
+                }
+                .buttonStyle(ActionButtonStyle())
+                .keyboardShortcut(.return, modifiers: [])
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .liquidGlassPanel(tint: game.freeRoam.isActive ? .mint.opacity(0.14) : .cyan.opacity(0.1))
     }
 
     private func actionLabel(icon: String, text: String) -> some View {
@@ -934,8 +1151,8 @@ struct ContentView: View {
                 replayPanel
                 resourcesPanel(ending.resources)
 
-                Button("重新开始") {
-                    game.startGame()
+                Button("返回菜单") {
+                    game.returnToMenuForNewGame()
                 }
                 .buttonStyle(ActionButtonStyle())
                 .keyboardShortcut(.defaultAction)

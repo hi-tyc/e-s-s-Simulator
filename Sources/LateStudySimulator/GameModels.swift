@@ -58,6 +58,67 @@ enum ViewMode: String, CaseIterable {
     }
 }
 
+enum PlayableRole: String, CaseIterable, Identifiable {
+    case homeroomTeacher = "班主任"
+    case honorStudent = "好学生"
+    case regularStudent = "普通学生"
+    case counselingPatrolTeacher = "心理巡查老师"
+
+    var id: String { rawValue }
+
+    static var selectableCases: [PlayableRole] {
+        [.homeroomTeacher, .honorStudent, .regularStudent]
+    }
+
+    var isTeacher: Bool {
+        switch self {
+        case .homeroomTeacher, .counselingPatrolTeacher:
+            return true
+        case .honorStudent, .regularStudent:
+            return false
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .homeroomTeacher: return "person.text.rectangle.fill"
+        case .honorStudent: return "medal.fill"
+        case .regularStudent: return "person.fill"
+        case .counselingPatrolTeacher: return "heart.text.square.fill"
+        }
+    }
+
+    var roleType: String {
+        isTeacher ? "教师线" : "学生线"
+    }
+
+    var shortDescription: String {
+        switch self {
+        case .homeroomTeacher:
+            return "在 KPI、班级秩序和学生真实状态之间做管理选择。"
+        case .honorStudent:
+            return "完成度高，但面具成本和排名压力更重。"
+        case .regularStudent:
+            return "压力和支持更均衡，适合体验学生主线。"
+        case .counselingPatrolTeacher:
+            return "从心理支持角度巡查班级，重点识别求助信号。"
+        }
+    }
+
+    var fixedDuty: String {
+        switch self {
+        case .homeroomTeacher:
+            return "维持晚自习秩序，完成年级巡视与纪律反馈。"
+        case .honorStudent:
+            return "保持高完成度和稳定表现，尽量不暴露疲惫。"
+        case .regularStudent:
+            return "在学习、身体需求、关系和风险之间找到平衡。"
+        case .counselingPatrolTeacher:
+            return "识别高压学生，提供低声支持，减少公开羞辱。"
+        }
+    }
+}
+
 enum TurnPhase: String {
     case observation = "观察"
     case action = "行动"
@@ -108,6 +169,7 @@ enum CameraPose: String, CaseIterable {
     case board = "抬头"
     case left = "左侧"
     case right = "右侧"
+    case rear = "后方"
 
     var angles: SCNVector3 {
         switch self {
@@ -116,6 +178,7 @@ enum CameraPose: String, CaseIterable {
         case .board: return SCNVector3(0.22, 0, 0)
         case .left: return SCNVector3(0, 0.86, 0)
         case .right: return SCNVector3(0, -0.86, 0)
+        case .rear: return SCNVector3(0, Float.pi, 0)
         }
     }
 
@@ -126,6 +189,7 @@ enum CameraPose: String, CaseIterable {
         case .desk: return .desk
         case .left: return .leftPeripheral
         case .right: return .rightPeripheral
+        case .rear: return .rearPeripheral
         }
     }
 
@@ -136,6 +200,7 @@ enum CameraPose: String, CaseIterable {
         case .board: return "e"
         case .left: return "a"
         case .right: return "d"
+        case .rear: return "q"
         }
     }
 }
@@ -146,6 +211,7 @@ enum VisionZone: String {
     case desk = "C区"
     case leftPeripheral = "D区"
     case rightPeripheral = "E区"
+    case rearPeripheral = "F区"
 
     var displayName: String {
         switch self {
@@ -154,6 +220,7 @@ enum VisionZone: String {
         case .desk: return "桌面近景"
         case .leftPeripheral: return "左侧余光"
         case .rightPeripheral: return "右侧余光"
+        case .rearPeripheral: return "后方视野"
         }
     }
 
@@ -163,6 +230,7 @@ enum VisionZone: String {
         case .middle: return 10
         case .desk: return 5
         case .leftPeripheral, .rightPeripheral: return 0
+        case .rearPeripheral: return 34
         }
     }
 }
@@ -215,39 +283,78 @@ enum PlayerPosture: String {
 }
 
 enum TeacherAction: String, CaseIterable, Identifiable {
-    case patrol = "巡视"
-    case warn = "提醒"
+    case scanClass = "看全班"
+    case observeTarget = "观察学生"
+    case publicWarn = "公开提醒"
+    case quietWarn = "低声提醒"
+    case care = "关心询问"
+    case allowBreak = "允许离开"
     case ignore = "选择性放过"
-    case care = "关心"
     case rest = "坐下休息"
-    case rearDoorObserve = "后门观察"
-    case fakePatrol = "假巡视"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .patrol: return "figure.walk"
-        case .warn: return "exclamationmark.bubble.fill"
-        case .ignore: return "eye.slash.fill"
+        case .scanClass: return "rectangle.3.group.fill"
+        case .observeTarget: return "eye.fill"
+        case .publicWarn: return "exclamationmark.bubble.fill"
+        case .quietWarn: return "bubble.left.fill"
         case .care: return "heart.text.square.fill"
+        case .allowBreak: return "figure.walk"
+        case .ignore: return "eye.slash.fill"
         case .rest: return "chair.fill"
-        case .rearDoorObserve: return "door.left.hand.closed"
-        case .fakePatrol: return "shoeprints.fill"
         }
     }
 
     var shortcut: Character {
         switch self {
-        case .patrol: return "1"
-        case .warn: return "2"
-        case .ignore: return "3"
-        case .care: return "4"
-        case .rest: return "5"
-        case .rearDoorObserve: return "6"
-        case .fakePatrol: return "7"
+        case .scanClass: return "1"
+        case .observeTarget: return "2"
+        case .publicWarn: return "3"
+        case .quietWarn: return "4"
+        case .care: return "5"
+        case .allowBreak: return "6"
+        case .ignore: return "7"
+        case .rest: return "8"
         }
     }
+}
+
+enum TeacherLocation: String, CaseIterable, Identifiable {
+    case podium = "讲台"
+    case leftAisle = "左过道"
+    case rightAisle = "右过道"
+    case rearDoor = "后门"
+    case targetDesk = "目标桌边"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .podium: return "rectangle.fill"
+        case .leftAisle, .rightAisle: return "figure.walk"
+        case .rearDoor: return "door.left.hand.closed"
+        case .targetDesk: return "person.crop.circle.badge.exclamationmark.fill"
+        }
+    }
+
+    var positionIndex: Int {
+        switch self {
+        case .podium: return 7
+        case .leftAisle: return 6
+        case .rightAisle: return 2
+        case .rearDoor: return 8
+        case .targetDesk: return 3
+        }
+    }
+}
+
+enum TeacherFocusMode: String {
+    case wholeClass = "看全班"
+    case selectedStudent = "看目标学生"
+    case blackboard = "看黑板/记录"
+    case rearDoor = "看后门"
 }
 
 struct PlayerState {
@@ -268,6 +375,23 @@ struct PlayerState {
 
     var breakdownRisk: Double {
         max(0, stress + maskCost * 0.45 + exposure * 0.25 - psychicEnergy - support * 0.18)
+    }
+}
+
+struct StudentFreeRoamState {
+    var isActive: Bool = false
+    var positionX: Double = -0.6
+    var positionZ: Double = 1.65
+    var yaw: Double = 0
+    var pitch: Double = 0
+    var startedAt: Date = .distantPast
+    var endsAt: Date = .distantPast
+    var hasExitedClassroom: Bool = false
+    var isSideways: Bool = false
+
+    var remainingSeconds: Int {
+        guard isActive else { return 0 }
+        return max(0, Int(ceil(endsAt.timeIntervalSinceNow)))
     }
 }
 
@@ -295,6 +419,13 @@ struct TeacherState {
     var kpiPressure: Double = 66
     var fatigue: Double = 44
     var empathy: Double = 42
+    var studentTrust: Double = 34
+    var counselingCapacity: Double = 36
+    var classOrder: Double = 62
+    var classRisk: Double = 34
+    var misreadRisk: Double = 24
+    var location: TeacherLocation = .podium
+    var focusMode: TeacherFocusMode = .wholeClass
     var positionIndex: Int = 0
     var isNearPlayer: Bool = false
     var studentsWarned: Int = 0
