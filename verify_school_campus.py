@@ -10,7 +10,7 @@ except ImportError as exc:
 ROOT = os.environ.get("SCHOOL_ROOT", os.path.dirname(os.path.abspath(__file__)))
 BLEND_PATH = os.environ.get("SCHOOL_BLEND", os.path.join(ROOT, "school_campus.blend"))
 PREVIEW_DIR = os.environ.get("SCHOOL_PREVIEW_DIR", os.path.join(ROOT, "campus_previews"))
-EXPECTED_PREVIEW_COUNT = 25
+EXPECTED_PREVIEW_COUNT = 26
 
 REQUIRED_KEYWORDS = [
     "微机室",
@@ -449,6 +449,26 @@ REQUIRED_KEYWORDS = [
     "积水告警数据线",
     "夜间天气韧性运行总览牌",
     "夜间天气韧性运行",
+    "无线AP",
+    "覆盖圈",
+    "边缘计算盒",
+    "物联网网关",
+    "校园核心交换机",
+    "下一代防火墙",
+    "网络准入NAC控制器",
+    "日志审计与安全态势屏",
+    "备份容灾一体机",
+    "NTP时钟服务器",
+    "校园统一时钟屏",
+    "IP广播分区终端",
+    "无线控制器到教学AP链路",
+    "无线控制器到体育AP链路",
+    "无线控制器到宿舍AP链路",
+    "无线控制器到校门AP链路",
+    "IoT传感器汇聚链路",
+    "安全日志回传链路",
+    "无线网络边缘计算总览牌",
+    "无线网络边缘计算",
 ]
 
 
