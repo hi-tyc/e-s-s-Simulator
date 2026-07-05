@@ -360,6 +360,65 @@ def make_cutaway_interiors_and_tunnels():
         text(f"{label}_文字", label, (x, y, 0.28), 0.42, MATS["white"])
 
 
+def make_daily_school_services():
+    # Campus boundary and emergency circulation.
+    cube("校园围墙_北侧", (0, 55.2, 1.0), (150, 0.45, 2.0), MATS["brick"], 0.04)
+    cube("校园围墙_西侧", (-75.2, 0, 1.0), (0.45, 110, 2.0), MATS["brick"], 0.04)
+    cube("校园围墙_东侧", (75.2, 0, 1.0), (0.45, 110, 2.0), MATS["brick"], 0.04)
+    cube("校园围墙_南侧分段左", (-48, -55.2, 1.0), (54, 0.45, 2.0), MATS["brick"], 0.04)
+    cube("校园围墙_南侧分段右", (48, -55.2, 1.0), (54, 0.45, 2.0), MATS["brick"], 0.04)
+    cube("消防车道_西环", (-68, 0, 0.11), (4.2, 96, 0.08), MATS["road"], 0.04)
+    cube("消防车道_东环", (68, 0, 0.11), (4.2, 96, 0.08), MATS["road"], 0.04)
+    cube("消防车道_北环", (0, 43, 0.11), (132, 4.2, 0.08), MATS["road"], 0.04)
+    cube("消防车道_南环", (0, -47, 0.11), (132, 4.2, 0.08), MATS["road"], 0.04)
+    text("fire lane label", "环形消防车道 / 可达各组团", (-50, -45.1, 0.22), 0.55, MATS["white"])
+
+    # Loading, maintenance, waste sorting, and delivery.
+    cube("后勤装卸区_硬化地面", (67, 34, 0.12), (11, 7, 0.08), MATS["road"], 0.04)
+    cube("后勤装卸月台", (64.2, 34, 0.6), (4.4, 5.8, 1.0), MATS["stone"], 0.04)
+    cube("后勤货车", (70, 34, 0.85), (5.0, 1.7, 1.45), MATS["white"], 0.08)
+    cube("垃圾分类站", (66, 42, 0.95), (8, 3.2, 1.8), MATS["metal"], 0.06)
+    for i, (x, color, name) in enumerate([(63.6, MATS["blue"], "可回收"), (65.2, MATS["green"], "厨余"), (66.8, MATS["red"], "有害"), (68.4, MATS["yellow"], "其他")]):
+        cube(f"垃圾分类桶_{name}", (x, 41.5, 0.72), (0.9, 0.8, 1.1), color, 0.04)
+    cube("设施索引_后勤装卸区", (67, 34, 0.55), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
+    cube("设施索引_垃圾分类站", (66, 42, 0.55), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
+
+    # General specialist classrooms beyond STEM.
+    specialty_rooms = [
+        ("语言实验室", 18, -29.3, MATS["blue"]),
+        ("美术教室", 22, -29.3, MATS["orange"]),
+        ("音乐教室", 26, -29.3, MATS["purple"]),
+        ("校史馆", -5.5, -25.8, MATS["stone"]),
+        ("教师发展中心", 5.5, -25.8, MATS["green"]),
+        ("家长接待室", -5.5, -17.3, MATS["white"]),
+    ]
+    for name, x, y, color in specialty_rooms:
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.95, 0.95, 0.58), MATS["orange"], 0.04)
+        cube(f"{name}_开放剖面空间", (x, y, 1.12), (3.2, 2.2, 1.65), MATS["glass"], 0.04)
+        cube(f"{name}_功能墙", (x, y + 1.08, 1.25), (2.4, 0.12, 0.8), color, 0.02)
+        text(f"{name}_标签", name, (x, y, 2.05), 0.34, MATS["white"])
+
+    # Toilets, elevators, access control, and stairs as repeatable floor service nodes.
+    for i, (x, y) in enumerate([(-44, 8), (-18, 16), (8, 16), (34, 8), (-44, 0), (-18, 8), (8, 8), (34, 0)]):
+        cube(f"卫生间节点_{i}", (x, y, 5.62), (1.2, 0.85, 0.25), MATS["white"], 0.03)
+        cube(f"电梯节点_{i}", (x + 1.55, y, 5.65), (0.75, 0.75, 0.42), MATS["metal"], 0.03)
+        cube(f"楼梯节点_{i}", (x - 1.55, y, 5.65), (0.9, 0.9, 0.38), MATS["stone"], 0.03)
+        cube(f"门禁闸机节点_{i}", (x, y - 0.85, 5.58), (1.4, 0.18, 0.42), MATS["screen"], 0.02)
+    cube("设施索引_卫生间电梯楼梯门禁", (-18, 18.5, 5.95), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+    # Clinic and counseling detail.
+    for i, (x, y, name, color) in enumerate([(9.0, 30.5, "校医诊室", MATS["white"]), (12.0, 30.5, "隔离观察室", MATS["yellow"]), (15.0, 30.5, "心理咨询室", MATS["purple"])]):
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.95, 0.95, 0.58), MATS["orange"], 0.04)
+        cube(f"{name}_房间", (x, y, 3.95), (2.4, 1.8, 0.16), color, 0.03)
+        cube(f"{name}_桌床设备", (x, y, 4.18), (1.2, 0.55, 0.18), MATS["metal"], 0.02)
+
+    # Small weather/air quality science station.
+    cyl("校园气象站_立杆", (-61, 38, 2.0), 0.07, 4.0, MATS["metal"], vertices=12)
+    cyl("校园气象站_风速仪", (-61, 38, 4.2), 0.28, 0.08, MATS["white"], vertices=24)
+    cube("校园空气质量传感器", (-60.4, 38, 3.1), (0.45, 0.32, 0.55), MATS["screen"], 0.04)
+    cube("设施索引_校园气象站空气质量", (-61, 38, 0.55), (1.0, 1.0, 0.62), MATS["orange"], 0.04)
+
+
 def make_sports_and_living():
     # Outdoor athletics
     cube("outdoor playground base", (45, -28, 0.06), (44, 26, 0.08), MATS["track"], 0.3)
@@ -463,6 +522,7 @@ PREVIEW_VIEWS = [
     ("07_STEM实验和创新空间", (-45, -44, 18), (-23, -24, 1), 30),
     ("08_交通消防能源系统", (-74, -72, 26), (-24, -32, 1), 26),
     ("09_楼内剖面和管廊", (74, 58, 34), (15, 13, 4), 28),
+    ("10_后勤边界和服务节点", (88, 74, 34), (48, 30, 2), 30),
 ]
 
 
@@ -526,6 +586,7 @@ def build_scene():
     make_transport_and_access()
     make_smart_safety_energy_systems()
     make_cutaway_interiors_and_tunnels()
+    make_daily_school_services()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)

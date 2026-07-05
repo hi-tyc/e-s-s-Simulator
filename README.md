@@ -15,6 +15,7 @@ Reference links:
 ## Files
 
 - `build_school_campus.py`: builds the complete campus map and preview images.
+- `verify_school_campus.py`: verifies required campus facilities exist in `school_campus.blend`.
 - `school_campus.blend`: generated complete campus scene.
 - `campus_previews/`: exported campus preview images and `00_校园总览拼图.png`.
 - `build_modern_classroom.py`: rebuilds the detailed classroom scene.
@@ -43,6 +44,14 @@ The full campus scene includes:
 - Canteen, dormitory/living group, clinic/counseling center.
 - Campus fiber backbone, power backbone, smart light poles.
 - Service energy/generator zone.
+- Physics, chemistry, biology, AI maker, VR, robotics, language, art, music, school-history, teacher-development, and parent-reception spaces.
+- Dining, dormitory, indoor sports, and teaching-building cutaway interiors.
+- Toilets, elevators, stair cores, access-control nodes.
+- Campus boundary walls, ring fire lane, loading dock, waste sorting station.
+- Bus drop-off, bike parking, accessible ramp.
+- Fire hydrants, evacuation routes, assembly areas, broadcast speakers.
+- Underground utility gallery with inspection manholes.
+- Weather station and air-quality sensor.
 
 ## Classroom Coverage
 
@@ -64,6 +73,7 @@ From this branch root:
 
 ```bash
 /snap/blender/current/blender -b --python build_school_campus.py
+/snap/blender/current/blender -b school_campus.blend --python verify_school_campus.py
 /snap/blender/current/blender -b --python build_modern_classroom.py
 /snap/blender/current/blender -b --python render_classroom_views.py
 ```
