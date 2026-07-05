@@ -1444,6 +1444,107 @@ def make_surrounding_city_interface():
     cube("设施索引_校外周边市政界面", (0, -70.2, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
 
 
+def make_night_weather_resilience_operations():
+    # Campus night/weather operations: lighting, drainage, lightning protection, and extreme-weather response.
+    lighting_points = [
+        ("智慧路灯_南门广场_西", -18, -50.2),
+        ("智慧路灯_南门广场_东", 18, -50.2),
+        ("智慧路灯_主轴_01", 0, -36),
+        ("智慧路灯_主轴_02", 0, -22),
+        ("智慧路灯_主轴_03", 0, -8),
+        ("智慧路灯_主轴_04", 0, 8),
+        ("智慧路灯_主轴_05", 0, 24),
+        ("智慧路灯_生活区", 46, 28),
+        ("智慧路灯_后勤区", 66, 36),
+        ("智慧路灯_校外公交站", -28, -66.5),
+    ]
+    for i, (name, x, y) in enumerate(lighting_points):
+        cyl(name, (x, y, 2.1), 0.07, 4.2, MATS["metal"], vertices=12)
+        cube(f"{name}_LED双臂灯头", (x, y + 0.38, 4.18), (0.85, 0.22, 0.18), MATS["light"], 0.025)
+        cube(f"设施索引_{name}", (x, y, 0.32), (0.55, 0.55, 0.32), MATS["orange"], 0.018)
+        if i in [0, 1, 3, 5, 9]:
+            bpy.ops.object.light_add(type="POINT", location=(x, y, 4.0))
+            lamp = bpy.context.object
+            lamp.name = f"{name}_真实点光源"
+            lamp.data.energy = 55
+            lamp.data.shadow_soft_size = 4.5
+
+    bollards = [(-28, -39), (-18, -34), (-8, -29), (8, -25), (18, -22), (28, -18), (38, -14), (48, -9)]
+    for i, (x, y) in enumerate(bollards):
+        cyl(f"低位庭院灯_{i}", (x, y, 0.55), 0.13, 1.1, MATS["light"], vertices=16, bevel=True)
+
+    floodlights = [
+        ("操场泛光灯塔_西南", 24, -42, 7.2),
+        ("操场泛光灯塔_东南", 66, -42, 7.2),
+        ("操场泛光灯塔_西北", 24, -14, 7.2),
+        ("操场泛光灯塔_东北", 66, -14, 7.2),
+        ("体育馆立面洗墙灯", 55, 4, 6.8),
+        ("图书馆立面洗墙灯", 0, -27, 5.4),
+    ]
+    for name, x, y, z in floodlights:
+        cyl(name, (x, y, z / 2), 0.1, z, MATS["metal"], vertices=12)
+        cube(f"{name}_灯组", (x, y + 0.42, z), (1.1, 0.32, 0.32), MATS["light"], 0.03)
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.62, 0.62, 0.34), MATS["orange"], 0.02)
+
+    dorm_windows = [(45, 27.5), (49, 27.5), (53, 27.5), (57, 27.5), (61, 27.5), (45, 34.5), (49, 34.5), (53, 34.5), (57, 34.5), (61, 34.5)]
+    for i, (x, y) in enumerate(dorm_windows):
+        cube(f"宿舍夜间暖光窗_{i}", (x, y, 5.15), (1.4, 0.08, 0.45), MATS["light"], 0.01)
+    cube("宿舍夜间查寝屏", (48.5, 26.2, 1.35), (2.4, 0.14, 1.0), MATS["screen"], 0.03)
+    cube("宿舍夜间静音提示牌", (56.5, 26.2, 1.25), (2.1, 0.14, 0.85), MATS["panel"], 0.03)
+
+    drainage_points = [
+        ("雨水篦子_南门低点", -8, -51.5),
+        ("雨水篦子_主轴低点", 0, -12),
+        ("雨水篦子_食堂后场", 37, 39),
+        ("雨水篦子_操场南侧", 45, -43),
+        ("雨水篦子_公交站", -30, -68),
+        ("积水监测传感器_南门", 8, -51.5),
+        ("积水监测传感器_操场", 55, -42),
+        ("积水监测传感器_后勤", 64, 39),
+    ]
+    for name, x, y in drainage_points:
+        cube(name, (x, y, 0.18), (1.15, 0.5, 0.08), MATS["metal"], 0.015)
+        cube(f"设施索引_{name}", (x, y, 0.48), (0.5, 0.5, 0.28), MATS["orange"], 0.016)
+    cube("暴雨溢流导排线_南门到雨水花园", (-27, -7.0, 0.1), (92, 0.16, 0.06), MATS["water"], 0.005, rot_z=math.radians(74))
+    cube("暴雨溢流导排线_操场到雨水花园", (3.5, -0.5, 0.1), (91, 0.16, 0.06), MATS["water"], 0.005, rot_z=math.radians(126))
+
+    weather_nodes = [
+        ("屋顶防雷针_图书馆", 0, -21, 7.2),
+        ("屋顶防雷针_STEM", -23, -24, 6.8),
+        ("屋顶防雷针_体育馆", 55, 11, 9.0),
+        ("屋顶防雷针_宿舍", 54, 31, 9.0),
+    ]
+    for name, x, y, z in weather_nodes:
+        cyl(name, (x, y, z), 0.045, 1.6, MATS["metal"], vertices=10)
+        cube(f"设施索引_{name}", (x, y, z + 0.95), (0.48, 0.48, 0.25), MATS["orange"], 0.014)
+    cube("雷暴天气预警屏", (-4, -49.5, 1.35), (2.8, 0.16, 1.15), MATS["screen"], 0.03)
+    cube("高温避暑开放点_图书馆", (5.5, -24.5, 1.0), (2.4, 1.3, 1.2), MATS["water"], 0.04)
+    cube("雨雪防滑物资箱_南门", (-10.5, -50.5, 0.7), (1.6, 0.8, 0.9), MATS["yellow"], 0.035)
+    cube("极端天气停课联动屏", (-31.5, -2.2, 1.35), (2.5, 0.16, 1.0), MATS["screen"], 0.03)
+
+    control_routes = [
+        ("夜间照明控制回路_主轴", 0, -50, 0, 26, MATS["yellow"], 0.11),
+        ("夜间照明控制回路_操场", 0, -8, 55, -28, MATS["yellow"], 0.11),
+        ("天气告警数据线_气象站到总控", -18, 38.5, -31.5, -4.6, MATS["blue"], 0.11),
+        ("积水告警数据线_南门到总控", 8, -51.5, -31.5, -4.6, MATS["blue"], 0.11),
+    ]
+    for name, x1, y1, x2, y2, material, width in control_routes:
+        angle = math.atan2(y2 - y1, x2 - x1)
+        length = math.hypot(x2 - x1, y2 - y1)
+        cube(name, ((x1 + x2) / 2, (y1 + y2) / 2, 0.24), (length, width, 0.06), material, 0.005, rot_z=angle)
+
+    cube("夜间天气韧性运行总览牌", (-32, -47.8, 1.35), (28, 0.38, 1.9), MATS["panel"], 0.06)
+    text(
+        "夜间天气韧性运行总览牌_文字",
+        "夜间天气：智慧路灯/庭院灯/泛光照明/暖光窗/排水篦子/积水监测/防雷/雷暴高温雨雪联动",
+        (-32, -48.05, 1.42),
+        0.28,
+        MATS["white"],
+        rot=(math.radians(90), 0, 0),
+    )
+    cube("设施索引_夜间天气韧性运行", (-32, -47.8, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -1530,6 +1631,7 @@ PREVIEW_VIEWS = [
     ("22_校园治理运行中枢", (-76, -34, 24), (-25, -9, 2), 28),
     ("23_外语国际交流学习中心", (54, -45, 21), (18, -18, 2), 30),
     ("24_校外周边市政界面", (48, -92, 24), (0, -61, 1), 28),
+    ("25_夜间天气韧性运行", (62, -74, 25), (6, -32, 2), 28),
 ]
 
 
@@ -1608,6 +1710,7 @@ def build_scene():
     make_campus_governance_operations()
     make_language_international_exchange_center()
     make_surrounding_city_interface()
+    make_night_weather_resilience_operations()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
