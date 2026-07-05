@@ -767,6 +767,77 @@ def make_teaching_detail_and_capacity_schedule():
     text("容量统计总表_正文", "初中·高中·国际·共享四组团，连廊连接图书馆/STEM/运动区", (-4, 28.52, 1.35), 0.28, MATS["white"], rot=(math.radians(90), 0, 0))
 
 
+def make_living_logistics_detail():
+    # Canteen operations: receiving, storage, cooking, serving, dish return, and food-safety monitoring.
+    canteen_nodes = [
+        ("食堂后厨_收货验收区", 23.2, 36.4, MATS["paving"]),
+        ("食堂后厨_冷库", 25.8, 36.4, MATS["blue"]),
+        ("食堂后厨_干货库", 28.4, 36.4, MATS["wood"]),
+        ("食堂后厨_粗加工间", 31.0, 36.4, MATS["metal"]),
+        ("食堂后厨_烹饪区", 33.6, 36.4, MATS["yellow"]),
+        ("食堂后厨_备餐间", 36.2, 36.4, MATS["white"]),
+        ("食堂后厨_洗消间", 38.8, 36.4, MATS["green"]),
+        ("食堂后厨_留样柜", 39.0, 32.5, MATS["screen"]),
+        ("食堂食品安全监测屏", 22.4, 31.2, MATS["screen"]),
+    ]
+    for name, x, y, material in canteen_nodes:
+        cube(name, (x, y, 4.95), (2.0, 1.25, 0.22), material, 0.025)
+        cube(f"设施索引_{name}", (x, y, 5.25), (0.58, 0.58, 0.28), MATS["orange"], 0.02)
+    for i, x in enumerate([23.2, 25.8, 28.4, 31.0, 33.6, 36.2, 38.8]):
+        cube(f"食堂洁污分流动线_{i}", (x, 34.7, 4.78), (1.7, 0.12, 0.06), MATS["green"] if i < 4 else MATS["red"], 0.006)
+    for i, x in enumerate([24.0, 27.0, 30.0, 33.0, 36.0]):
+        cube(f"食堂取餐排队栏杆_{i}", (x, 27.8, 4.75), (0.08, 2.4, 0.38), MATS["metal"], 0.01)
+        cube(f"食堂餐盘回收口_{i}", (x, 25.9, 4.85), (1.0, 0.18, 0.5), MATS["screen"], 0.01)
+
+    # Dormitory detail: sample rooms, bathrooms, laundry, study, houseparent, and night management.
+    dorm_modules = [
+        ("宿舍样板间_四人间A", 44, 33.8, MATS["white"]),
+        ("宿舍样板间_四人间B", 47.6, 33.8, MATS["white"]),
+        ("宿舍样板间_四人间C", 51.2, 33.8, MATS["white"]),
+        ("宿舍样板间_四人间D", 54.8, 33.8, MATS["white"]),
+        ("宿舍公共卫生间", 58.8, 33.8, MATS["blue"]),
+        ("宿舍淋浴间", 62.8, 33.8, MATS["green"]),
+        ("宿舍洗衣烘干房", 66.0, 31.8, MATS["metal"]),
+        ("宿舍夜间值班室", 41.8, 31.8, MATS["wood"]),
+        ("宿舍公共自习室", 50.2, 31.8, MATS["paving"]),
+        ("宿舍生活导师室", 57.0, 31.8, MATS["wood"]),
+    ]
+    for name, x, y, material in dorm_modules:
+        cube(name, (x, y, 6.88), (3.0, 1.65, 0.18), material, 0.026)
+        cube(f"设施索引_{name}", (x, y, 7.16), (0.55, 0.55, 0.28), MATS["orange"], 0.02)
+    for room, x in enumerate([44, 47.6, 51.2, 54.8]):
+        for bed in range(4):
+            bx = x - 0.85 + (bed % 2) * 1.7
+            by = 33.45 + (bed // 2) * 0.68
+            cube(f"宿舍样板间_床铺_{room}_{bed}", (bx, by, 7.1), (0.65, 0.48, 0.16), MATS["blue"] if bed % 2 else MATS["green"], 0.015)
+        cube(f"宿舍样板间_书桌柜_{room}", (x, 34.4, 7.12), (1.8, 0.22, 0.22), MATS["wood"], 0.012)
+    for i, x in enumerate([58.2, 59.4, 62.2, 63.4]):
+        cyl(f"宿舍卫浴洁具_{i}", (x, 33.45, 7.08), 0.18, 0.16, MATS["white"], vertices=18)
+    for i, x in enumerate([65.3, 66.0, 66.7]):
+        cyl(f"宿舍洗衣烘干机_{i}", (x, 31.45, 7.08), 0.24, 0.32, MATS["white"], vertices=24)
+    for i, x in enumerate([48.8, 50.2, 51.6]):
+        cube(f"宿舍自习桌_{i}", (x, 31.45, 7.08), (1.0, 0.38, 0.14), MATS["wood"], 0.012)
+        cube(f"宿舍自习灯_{i}", (x, 31.45, 7.34), (0.55, 0.08, 0.08), MATS["light"], 0.006)
+
+    # Logistics support and inventory tracking around the service yard.
+    logistics_nodes = [
+        ("后勤仓储间", 62, 38, MATS["metal"]),
+        ("清洁工具间", 65, 38, MATS["green"]),
+        ("维修工坊", 68, 38, MATS["yellow"]),
+        ("校服教材周转库", 71, 38, MATS["blue"]),
+        ("后勤数字库存屏", 66.5, 30.5, MATS["screen"]),
+        ("冷链卸货位", 72, 31, MATS["blue"]),
+        ("厨余暂存冷藏箱", 69.5, 43.5, MATS["green"]),
+        ("油烟净化设备", 39.5, 38.4, MATS["metal"]),
+    ]
+    for name, x, y, material in logistics_nodes:
+        cube(name, (x, y, 1.35), (2.2, 1.25, 1.35), material, 0.04)
+        cube(f"设施索引_{name}", (x, y, 0.42), (0.7, 0.7, 0.45), MATS["orange"], 0.03)
+    cube("生活后勤洁污分流总图", (55, 45.6, 1.35), (18, 0.38, 1.9), MATS["panel"], 0.06)
+    text("生活后勤洁污分流总图_文字", "食材入库→加工→供餐 / 餐盘回收→洗消 / 宿舍生活服务", (55, 45.35, 1.42), 0.35, MATS["white"], rot=(math.radians(90), 0, 0))
+    cube("设施索引_生活后勤完整运营", (55, 45.6, 2.55), (1.0, 1.0, 0.45), MATS["orange"], 0.04)
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -843,6 +914,7 @@ PREVIEW_VIEWS = [
     ("12_规划行政实验安全运动", (-76, 62, 31), (-20, 12, 3), 28),
     ("13_地图索引图层控制", (-88, 32, 24), (-48, 24, 2), 30),
     ("14_教学楼容量与智慧教室", (66, 34, 24), (30, 12, 6), 34),
+    ("15_生活后勤食堂宿舍运营", (84, 58, 24), (52, 35, 4), 30),
 ]
 
 
@@ -911,6 +983,7 @@ def build_scene():
     make_planning_admin_and_learning_landscape()
     make_map_index_and_system_layers()
     make_teaching_detail_and_capacity_schedule()
+    make_living_logistics_detail()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
