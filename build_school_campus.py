@@ -676,6 +676,97 @@ def make_map_index_and_system_layers():
     cube("设施索引_地图索引图层控制", (-65, 51.4, 2.62), (1.0, 1.0, 0.4), MATS["orange"], 0.04)
 
 
+def make_teaching_detail_and_capacity_schedule():
+    # Teaching blocks become legible as a room schedule: grade zones, room numbers, teacher offices, and capacity.
+    teaching_blocks = [
+        ("初中部", -38, 4, "T01"),
+        ("高中部", -12, 12, "T02"),
+        ("国际部", 14, 12, "T03"),
+        ("共享教室", 40, 4, "T04"),
+    ]
+    for block_idx, (grade, cx, cy, code) in enumerate(teaching_blocks):
+        cube(f"年级分区牌_{grade}", (cx, cy - 6.6, 1.25), (6.8, 0.28, 1.45), MATS["panel"], 0.045)
+        text(f"年级分区牌_{grade}_文字", f"{code} {grade}", (cx, cy - 6.78, 1.42), 0.38, MATS["light"], rot=(math.radians(90), 0, 0))
+        for floor in range(1, 4):
+            for room in range(1, 5):
+                x = cx - 6.0 + (room - 1) * 4.0
+                y = cy + 4.1 + (floor - 1) * 0.52
+                z = 5.86 + (floor - 1) * 0.08
+                room_code = f"{code}-{floor}{room:02d}"
+                cube(f"教室编号_{room_code}", (x, y, z), (2.4, 0.16, 0.38), MATS["screen"], 0.018)
+                text(f"教室编号_{room_code}_文字", room_code, (x, y - 0.1, z + 0.02), 0.18, MATS["light"], rot=(math.radians(90), 0, 0))
+        support_rooms = [
+            ("班主任办公室", cx - 6.0, cy - 4.5, MATS["wood"]),
+            ("备课室", cx - 2.0, cy - 4.5, MATS["white"]),
+            ("年级组办公室", cx + 2.0, cy - 4.5, MATS["green"]),
+            ("学生储物间", cx + 6.0, cy - 4.5, MATS["metal"]),
+        ]
+        for name, x, y, material in support_rooms:
+            cube(f"{grade}_{name}", (x, y, 5.72), (2.4, 1.15, 0.16), material, 0.025)
+            cube(f"{grade}_{name}_家具", (x, y, 5.95), (1.1, 0.42, 0.18), MATS["wood"], 0.015)
+        cube(f"{grade}_课间灰空间", (cx, cy - 1.15, 5.68), (13.8, 1.1, 0.12), MATS["paving"], 0.025)
+
+    # Covered links between learning courtyards: useful for a complete walkable campus map.
+    link_specs = [
+        ("风雨连廊_初高中", -25, 8, 22, 1.6, 0),
+        ("风雨连廊_高中国际", 1, 12, 22, 1.6, 0),
+        ("风雨连廊_国际共享", 27, 8, 22, 1.6, 0),
+        ("风雨连廊_教学到图书馆", -6, -6, 34, 1.35, math.radians(-28)),
+    ]
+    for name, x, y, length, width, rot_z in link_specs:
+        cube(name, (x, y, 2.75), (length, width, 0.22), MATS["glass"], 0.04, rot_z=rot_z)
+        for off in [-length / 2 + 2.0, length / 2 - 2.0]:
+            dx = math.cos(rot_z) * off
+            dy = math.sin(rot_z) * off
+            cyl(f"{name}_支柱_{off:.1f}", (x + dx, y + dy, 1.35), 0.08, 2.5, MATS["metal"], vertices=12)
+
+    # Representative 55-seat smart classroom cutaway embedded in the shared teaching block.
+    base_x, base_y, base_z = 40, 12.2, 6.2
+    cube("55人智慧大教室样板_地面", (base_x, base_y, base_z), (14.0, 8.2, 0.14), MATS["white"], 0.03)
+    cube("55人智慧大教室样板_漂亮地台", (base_x, base_y + 3.45, base_z + 0.18), (13.4, 1.45, 0.28), MATS["wood"], 0.04)
+    cube("55人智慧大教室样板_中间黑板", (base_x, base_y + 4.25, base_z + 0.88), (4.2, 0.12, 1.0), MATS["panel"], 0.02)
+    cube("55人智慧大教室样板_左触控屏", (base_x - 4.1, base_y + 4.25, base_z + 0.88), (2.2, 0.12, 1.0), MATS["screen"], 0.02)
+    cube("55人智慧大教室样板_右触控屏", (base_x + 4.1, base_y + 4.25, base_z + 0.88), (2.2, 0.12, 1.0), MATS["screen"], 0.02)
+    cube("55人智慧大教室样板_嵌入式讲台电脑", (base_x, base_y + 2.65, base_z + 0.58), (2.3, 0.82, 0.56), MATS["wood"], 0.03)
+    cube("55人智慧大教室样板_屏幕右侧IO排线仓", (base_x + 5.5, base_y + 4.18, base_z + 0.78), (0.62, 0.18, 0.82), MATS["metal"], 0.02)
+    for i, label in enumerate(["USB", "DP", "HDMI", "LAN"]):
+        cube(f"55人智慧大教室样板_IO_{label}", (base_x + 5.5, base_y + 4.0, base_z + 1.08 - i * 0.18), (0.34, 0.04, 0.08), MATS["blue"] if i % 2 == 0 else MATS["yellow"], 0.006)
+    cube("55人智慧大教室样板_墙内线槽", (base_x + 5.5, base_y + 2.1, base_z + 0.34), (0.2, 4.2, 0.12), MATS["yellow"], 0.01)
+    cube("55人智慧大教室样板_地面线槽", (base_x + 2.8, base_y + 2.0, base_z + 0.26), (5.6, 0.18, 0.08), MATS["yellow"], 0.01)
+    cube("55人智慧大教室样板_后排黑板报", (base_x, base_y - 4.25, base_z + 0.82), (10.8, 0.1, 0.9), MATS["green"], 0.02)
+    for i, x in enumerate([-4.8, -2.4, 0, 2.4, 4.8]):
+        cube(f"55人智慧大教室样板_黑板报栏目_{i}", (base_x + x, base_y - 4.32, base_z + 0.84), (1.6, 0.05, 0.56), MATS["orange"] if i % 2 else MATS["blue"], 0.01)
+    for i, x in enumerate([-5.4, -1.8, 1.8, 5.4]):
+        cube(f"55人智慧大教室样板_LED灯带_{i}", (base_x + x, base_y, base_z + 1.95), (2.5, 0.18, 0.08), MATS["light"], 0.02)
+        cyl(f"55人智慧大教室样板_吊扇_{i}", (base_x + x, base_y - 0.9, base_z + 1.74), 0.55, 0.055, MATS["metal"], vertices=24)
+    for i, x in enumerate([-6.5, 6.5]):
+        cube(f"55人智慧大教室样板_壁挂空调_{i}", (base_x + x, base_y + 0.9, base_z + 1.55), (0.18, 1.8, 0.45), MATS["white"], 0.035)
+        cube(f"55人智慧大教室样板_空调外机连线_{i}", (base_x + x, base_y + 2.2, base_z + 1.5), (0.12, 1.8, 0.08), MATS["metal"], 0.008)
+
+    seat_index = 0
+    group_centers = [(-4.7, -1.8), (-1.55, -1.8), (1.55, -1.8), (4.7, -1.8)]
+    for group, (gx, gy) in enumerate(group_centers):
+        for row in range(4):
+            for pair in range(2):
+                desk_x = base_x + gx + (pair - 0.5) * 1.15
+                desk_y = base_y + gy + row * 0.88
+                cube(f"55人智慧大教室样板_四组双人桌_{group}_{row}_{pair}", (desk_x, desk_y, base_z + 0.42), (0.86, 0.5, 0.12), MATS["wood"], 0.018)
+                cube(f"55人智慧大教室样板_抽屉书本_{group}_{row}_{pair}", (desk_x, desk_y - 0.08, base_z + 0.31), (0.62, 0.18, 0.08), MATS["blue"], 0.006)
+                for side in [-0.18, 0.18]:
+                    if seat_index < 55:
+                        cube(f"55人智慧大教室样板_学生座位_{seat_index:02d}", (desk_x + side, desk_y - 0.38, base_z + 0.38), (0.26, 0.22, 0.18), MATS["stone"], 0.012)
+                        seat_index += 1
+    while seat_index < 55:
+        cube(f"55人智慧大教室样板_学生座位_{seat_index:02d}", (base_x + 5.9, base_y - 3.1 + (seat_index - 32) * 0.16, base_z + 0.38), (0.26, 0.22, 0.18), MATS["stone"], 0.012)
+        seat_index += 1
+    cube("设施索引_55人智慧大教室样板", (base_x, base_y, base_z + 2.25), (1.0, 1.0, 0.38), MATS["orange"], 0.03)
+
+    # Capacity and class schedule board next to the teaching zone.
+    cube("容量统计总表", (-4, 28.8, 1.5), (26, 0.42, 2.35), MATS["panel"], 0.06)
+    text("容量统计总表_标题", "教学容量：普通教室48间 / 55人大教室样板 / 走班与选修空间", (-4, 28.55, 2.15), 0.34, MATS["light"], rot=(math.radians(90), 0, 0))
+    text("容量统计总表_正文", "初中·高中·国际·共享四组团，连廊连接图书馆/STEM/运动区", (-4, 28.52, 1.35), 0.28, MATS["white"], rot=(math.radians(90), 0, 0))
+
+
 def make_labels_and_legend():
     cube("legend panel", (-65, 47, 0.9), (18, 0.35, 1.8), MATS["panel"], 0.06)
     text("legend title", "智慧校园总图图例", (-65, 46.78, 1.5), 0.55, MATS["light"], rot=(math.radians(90), 0, 0))
@@ -751,6 +842,7 @@ PREVIEW_VIEWS = [
     ("11_图书体育公共服务", (64, -6, 28), (22, -14, 5), 30),
     ("12_规划行政实验安全运动", (-76, 62, 31), (-20, 12, 3), 28),
     ("13_地图索引图层控制", (-88, 32, 24), (-48, 24, 2), 30),
+    ("14_教学楼容量与智慧教室", (66, 34, 24), (30, 12, 6), 34),
 ]
 
 
@@ -818,6 +910,7 @@ def build_scene():
     make_public_amenities_and_special_interiors()
     make_planning_admin_and_learning_landscape()
     make_map_index_and_system_layers()
+    make_teaching_detail_and_capacity_schedule()
     make_labels_and_legend()
     setup_camera_lights()
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)

@@ -63,8 +63,9 @@ The full campus scene includes:
 - Sports support rooms: changing room, shower room, equipment room, referee/medical point.
 - Wayfinding screens, AED boxes, emergency phones, drinking water points, lockers, electronic class boards, visitor terminal, and charging station.
 - Map delivery aids: coordinate grid, north arrow, scale bar, building ID tags, floor-function boards, route layers, system overview boards, CCTV coverage disks, and electronic layer-control console.
+- Teaching-detail layer: grade-zone boards, classroom room numbers, teacher offices, preparation rooms, grade offices, storage rooms, covered corridors, a capacity schedule board, and an embedded 55-seat smart-classroom cutaway with four paired-desk groups.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 13 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 14 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 
