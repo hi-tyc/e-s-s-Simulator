@@ -66,8 +66,9 @@ The full campus scene includes:
 - Teaching-detail layer: grade-zone boards, classroom room numbers, teacher offices, preparation rooms, grade offices, storage rooms, covered corridors, a capacity schedule board, and an embedded 55-seat smart-classroom cutaway with four paired-desk groups.
 - Living/logistics operations: canteen receiving, cold/dry storage, rough processing, cooking, serving, dishwashing/disinfection, retained-sample cabinet, food-safety screen, dorm sample rooms, bathrooms, shower, laundry, study, houseparent, logistics storage, repair workshop, cold-chain bay, kitchen-waste cold box, and fume purification.
 - Sports-health system: indoor basketball, volleyball, badminton, table tennis, fitness, dance/yoga, body-test zone, retractable stand, scoreboard, sports AED/medical point, outdoor volleyball/tennis/fitness/calisthenics zones, PE office, equipment issue, injury treatment, and night-running lights.
+- Safety-resilience layer: perimeter intrusion detection, visitor/vehicle verification, patrol checkpoints, fire alarm call points, smoke detectors, emergency lighting, fire shutters, alarm/security linkage panels, emergency supplies, shelter tents, satellite communications, emergency wireless base station, UPS, battery storage, microgrid switchgear, emergency water purification, and command center.
 
-The campus verifier checks the generated `.blend` for required facilities and verifies that at least 16 numbered campus preview images plus the overview contact sheet exist.
+The campus verifier checks the generated `.blend` for required facilities and verifies that at least 17 numbered campus preview images plus the overview contact sheet exist.
 
 ## Classroom Coverage
 
