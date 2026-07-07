@@ -37,6 +37,9 @@ final class GameManager: ObservableObject {
     @Published var studentLookYaw: Double = 0
     @Published var studentLookPitch: Double = 0
     @Published var freeRoam = StudentFreeRoamState()
+    @Published var frontDoorOpen: Bool = false
+    @Published var rearDoorOpen: Bool = false
+    @Published var playerLockerOpen: Bool = false
     @Published var viewMode: ViewMode = .student
     @Published var selectedTeacherTargetID: Int?
     @Published var message: String = "晚自习开始。教室里的笔尖声和风扇声混在一起。"
@@ -49,6 +52,7 @@ final class GameManager: ObservableObject {
     @Published var peripheralRight: Double = 0.25
     @Published var classroomLightLevel: Double = 1.0
     @Published var triggeredPeriods: Set<StudyPeriod> = []
+    @Published var leaveSeatUsedPeriods: Set<StudyPeriod> = []
     @Published var monologues: [InnerMonologue] = []
     @Published var hasTriggeredLoneliness: Bool = false
     @Published var hasTriggeredPhoneNotification: Bool = false
@@ -87,6 +91,9 @@ final class GameManager: ObservableObject {
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
         freeRoam = StudentFreeRoamState()
+        frontDoorOpen = false
+        rearDoorOpen = false
+        playerLockerOpen = false
         viewMode = activeRole.isTeacher ? .teacher : .student
         classmates = makeClassmates()
         selectedTeacherTargetID = classmates.max { lhs, rhs in lhs.stress < rhs.stress }?.id
@@ -97,6 +104,7 @@ final class GameManager: ObservableObject {
         selectedReplayIndex = 0
         classroomLightLevel = 1.0
         triggeredPeriods = []
+        leaveSeatUsedPeriods = []
         monologues = []
         hasTriggeredLoneliness = false
         hasTriggeredPhoneNotification = false
@@ -161,8 +169,10 @@ final class GameManager: ObservableObject {
             player.stress = max(18, settings.rankingPressure * 0.04)
             player.exposure = 8
             player.homework = 0
+            player.thirst = 14
             player.hunger = 18
             player.bladder = 12
+            player.waterCup = 100
             player.visualAttention = 88
         }
         clampPlayer()
@@ -443,7 +453,7 @@ final class GameManager: ObservableObject {
         return value
     }
 
-    private func beginStudentFreeRoam() {
+    private func beginStudentFreeRoam(duration: TimeInterval = 60, openingMessage: String? = nil) {
         guard activeRole.isTeacher == false else { return }
         freeRoamTimer?.invalidate()
         let now = Date()
@@ -456,12 +466,15 @@ final class GameManager: ObservableObject {
             yaw: 0,
             pitch: 0,
             startedAt: now,
-            endsAt: now.addingTimeInterval(60),
-            hasExitedClassroom: false
+            endsAt: now.addingTimeInterval(duration),
+            hasExitedClassroom: false,
+            isSideways: false,
+            frontDoorOpen: frontDoorOpen,
+            rearDoorOpen: rearDoorOpen
         )
         player.posture = .standing
         gameState = .playing
-        message = "老师点头同意。你获得 60 秒离座活动时间，可以按住画面拖动调整方向，按住空格朝当前方向往前走；窄缝处按住 Shift 侧身通过。"
+        message = openingMessage ?? "老师点头同意。你获得 \(Int(duration)) 秒离座活动时间，可以按住画面拖动调整方向，按住空格朝当前方向往前走；靠近前后门时可以开门或关门。"
         addAudioCue(.chair, direction: "座位到过道", intensity: 0.56, note: "获批离座后，椅子声从违规风险变成了被允许的移动声。")
         freeRoamTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -490,6 +503,133 @@ final class GameManager: ObservableObject {
             player.stress = max(0, player.stress - 0.05)
         }
         objectWillChange.send()
+    }
+
+    var nearbyStudentDoor: StudentDoor? {
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return nil }
+        return StudentDoor.allCases
+            .map { door in
+                let dx = freeRoam.positionX - door.centerX
+                let dz = freeRoam.positionZ - door.centerZ
+                return (door: door, distance: sqrt(dx * dx + dz * dz))
+            }
+            .filter { $0.distance <= 1.05 }
+            .min { $0.distance < $1.distance }?
+            .door
+    }
+
+    func isStudentDoorOpen(_ door: StudentDoor) -> Bool {
+        switch door {
+        case .front: return frontDoorOpen
+        case .rear: return rearDoorOpen
+        }
+    }
+
+    func toggleNearbyStudentDoor() {
+        guard let door = nearbyStudentDoor else { return }
+        let willOpen = isStudentDoorOpen(door) == false
+        let didPushPlayer = willOpen ? false : pushPlayerOutOfDoorwayBeforeClosing(door)
+        switch door {
+        case .front:
+            frontDoorOpen = willOpen
+            freeRoam.frontDoorOpen = willOpen
+        case .rear:
+            rearDoorOpen = willOpen
+            freeRoam.rearDoorOpen = willOpen
+        }
+
+        if willOpen {
+            player.exposure += 1.5
+            message = "你轻轻打开\(door.rawValue)。门缝让走廊变得可达，但门轴声也会让你更显眼。"
+            addAudioCue(.knock, direction: door.rawValue, intensity: 0.36, note: "\(door.rawValue)打开，声音短促但在安静教室里仍然明显。")
+        } else {
+            player.exposure += 0.8
+            message = didPushPlayer
+                ? "你站在\(door.rawValue)门洞里带上门，身体被迫退到门的一侧。通道被重新挡住。"
+                : "你把\(door.rawValue)带上。通道被重新挡住，脚步声也暂时被教室墙面收回。"
+            addAudioCue(.knock, direction: door.rawValue, intensity: 0.24, note: "\(door.rawValue)关闭，动作比开门更轻，但仍有一点门锁声。")
+        }
+        clampPlayer()
+        objectWillChange.send()
+    }
+
+    var isNearPlayerLocker: Bool {
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return false }
+        let dx = freeRoam.positionX - 6.22
+        let dz = freeRoam.positionZ - (-3.9)
+        return sqrt(dx * dx + dz * dz) <= 0.9
+    }
+
+    func togglePlayerLocker() {
+        guard isNearPlayerLocker else { return }
+        playerLockerOpen.toggle()
+        player.exposure += playerLockerOpen ? 0.8 : 0.3
+        message = playerLockerOpen
+            ? "你打开自己的储物柜。里面暂时只是一片阴影，之后可以在这里选择取走物品。"
+            : "你把储物柜合上，金属门发出很轻的一声。"
+        addAudioCue(.knock, direction: "走廊储物柜", intensity: playerLockerOpen ? 0.3 : 0.22, note: "储物柜门声比教室门轻，但在走廊里仍然清楚。")
+        clampPlayer()
+        objectWillChange.send()
+    }
+
+    var isNearWaterDispenser: Bool {
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return false }
+        let dx = freeRoam.positionX - 6.2
+        let dz = freeRoam.positionZ - 3.9
+        return sqrt(dx * dx + dz * dz) <= 0.95
+    }
+
+    func refillWaterCup() {
+        guard isNearWaterDispenser else { return }
+        player.waterCup = 100
+        player.exposure += currentPeriod.isBreak ? 0.2 : 1.2
+        message = "你在饮水机旁把水杯接满。杯里的水回到 100，之后可以在座位上继续喝。"
+        addAudioCue(.knock, direction: "走廊饮水机", intensity: 0.2, note: "水流声很轻，课间会被走廊声盖住。")
+        clampPlayer()
+        objectWillChange.send()
+    }
+
+    var isNearRestroom: Bool {
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return false }
+        let dx = freeRoam.positionX - 6.12
+        let dz = freeRoam.positionZ - 5.85
+        return sqrt(dx * dx + dz * dz) <= 1.05
+    }
+
+    func useRestroom() {
+        guard isNearRestroom else { return }
+        player.bladder = 0
+        player.stress = max(0, player.stress - 8)
+        player.psychicEnergy = min(100, player.psychicEnergy + 4)
+        let remaining = max(0, freeRoam.endsAt.timeIntervalSinceNow - 10)
+        freeRoam.endsAt = Date().addingTimeInterval(remaining)
+        freeRoam.hasExitedClassroom = true
+        message = "你进入洗手间，过程消耗 10 秒。如厕需求归零，身体终于不用继续和注意力抢位置。"
+        addAudioCue(.footstep, direction: "洗手间门口", intensity: 0.24, note: "洗手间里的脚步被墙面削弱，离开教室后的声音边界变远。")
+        addMonologue("不是我矫情，是身体真的需要被允许处理。", intensity: 0.42)
+        clampPlayer()
+        objectWillChange.send()
+    }
+
+    private func pushPlayerOutOfDoorwayBeforeClosing(_ door: StudentDoor) -> Bool {
+        let doorHalfDepth = 0.48
+        let doorHalfWidth = 0.14
+        let radius = currentFreeRoamPlayerRadius
+        let overlapsDoorDepth = abs(freeRoam.positionZ - door.centerZ) <= doorHalfDepth + radius
+        let overlapsDoorWidth = abs(freeRoam.positionX - door.centerX) <= doorHalfWidth + radius
+        guard overlapsDoorDepth && overlapsDoorWidth else { return false }
+
+        let pushToCorridor = freeRoam.positionX >= door.centerX
+        let clearX = pushToCorridor
+            ? door.centerX + doorHalfWidth + radius + 0.04
+            : door.centerX - doorHalfWidth - radius - 0.15
+        let clampedZ = freeRoam.positionZ.clamped(to: (door.centerZ - 0.34)...(door.centerZ + 0.34))
+        freeRoam.positionX = clearX
+        freeRoam.positionZ = clampedZ
+        if pushToCorridor {
+            freeRoam.hasExitedClassroom = true
+        }
+        return true
     }
 
     private func resolvedFreeRoamPosition(fromX: Double, fromZ: Double, toX: Double, toZ: Double) -> (x: Double, z: Double) {
@@ -533,7 +673,9 @@ final class GameManager: ObservableObject {
     private var freeRoamWalkableRegions: [FreeRoamRect] {
         [
             FreeRoamRect(minX: -3.55, maxX: 3.72, minZ: -5.55, maxZ: 5.55),
-            FreeRoamRect(minX: 3.35, maxX: 6.22, minZ: -8.18, maxZ: 8.18)
+            FreeRoamRect(minX: 3.35, maxX: 6.22, minZ: -11.35, maxZ: 8.18),
+            FreeRoamRect(minX: 2.22, maxX: 4.02, minZ: -10.2, maxZ: -8.5),
+            FreeRoamRect(minX: 6.0, maxX: 7.16, minZ: 5.35, maxZ: 6.38)
         ]
     }
 
@@ -552,12 +694,28 @@ final class GameManager: ObservableObject {
 
         obstacles.append(expandedObstacle(centerX: 0, centerZ: -4.7, width: 2.02, length: 0.98))
         obstacles.append(expandedObstacle(centerX: 0, centerZ: -5.94, width: 4.35, length: 0.12))
-        obstacles.append(expandedObstacle(centerX: 4.3, centerZ: -4.82, width: 0.82, length: 0.1))
-        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: -5.32, width: 0.16, length: 1.36))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: -5.56, width: 0.16, length: 0.88))
+        obstacles.append(expandedObstacle(centerX: 4.0, centerZ: -3.34, width: 0.16, length: 1.68))
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: -1.78, width: 0.16, length: 1.46))
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 3.02, width: 0.16, length: 2.08))
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 0.85, width: 0.16, length: 5.4))
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 5.61, width: 0.16, length: 0.8))
+
+        if frontDoorOpen == false {
+            obstacles.append(expandedObstacle(centerX: StudentDoor.front.centerX, centerZ: StudentDoor.front.centerZ, width: 0.28, length: 0.96))
+        }
+        if rearDoorOpen == false {
+            obstacles.append(expandedObstacle(centerX: StudentDoor.rear.centerX, centerZ: StudentDoor.rear.centerZ, width: 0.28, length: 0.96))
+        }
+
+        obstacles.append(expandedObstacle(centerX: 3.88, centerZ: -7.25, width: 0.36, length: 3.86))
+        obstacles.append(expandedObstacle(centerX: 3.88, centerZ: 7.25, width: 0.36, length: 3.86))
+        obstacles.append(expandedObstacle(centerX: 5.25, centerZ: -11.48, width: 2.72, length: 0.24))
+        obstacles.append(expandedObstacle(centerX: 2.18, centerZ: -9.35, width: 0.08, length: 2.2))
+        obstacles.append(expandedObstacle(centerX: 3.12, centerZ: -10.42, width: 1.86, length: 0.08))
+        obstacles.append(expandedObstacle(centerX: 3.12, centerZ: -8.28, width: 1.86, length: 0.08))
+        obstacles.append(expandedObstacle(centerX: 6.98, centerZ: 5.3, width: 0.46, length: 0.12))
+        obstacles.append(expandedObstacle(centerX: 6.98, centerZ: 6.4, width: 0.46, length: 0.12))
 
         for lockerZ in [-7.55, -6.85, -5.2, -4.55, -3.9, -3.25, 6.75, 7.45] {
             obstacles.append(expandedObstacle(centerX: 6.55, centerZ: lockerZ, width: 0.5, length: 0.42))
@@ -605,14 +763,12 @@ final class GameManager: ObservableObject {
             player.homework = max(0, player.homework - 5)
             player.exposure = max(0, player.exposure - 8)
             player.stress = max(0, player.stress - 18)
-            player.bladder = max(0, player.bladder - 78)
             addMonologue("离开教室几十秒，我才知道自己刚才一直在憋着。", intensity: 0.58)
             message = reason ?? "你提前回到座位。短暂走出教室没有解决所有压力，但身体明显松了一点。"
         } else {
             player.psychicEnergy += 7
             recoverAttention(10)
             player.stress = max(0, player.stress - 6)
-            player.bladder = max(0, player.bladder - 10)
             player.exposure += 3
             message = reason ?? "你提前回到座位。你没有真正走出教室，但站起来活动让身体从僵硬里退出来一点。"
         }
@@ -743,6 +899,20 @@ final class GameManager: ObservableObject {
             message = "窗外的路灯和远处车声给了你几秒钟的认知脱离。"
             addMonologue("窗外还有路灯和车声，不只是这间教室。", intensity: 0.34)
             addAudioCue(.whisper, direction: "左窗外", intensity: 0.26, note: "远处车声提示教室外还有另一个世界。")
+        case .drink:
+            if player.waterCup >= 25 {
+                player.thirst = max(0, player.thirst - 20)
+                player.waterCup = max(0, player.waterCup - 25)
+                player.psychicEnergy += 3
+                player.stress = max(0, player.stress - 3)
+                player.exposure += teacher.isNearPlayer ? 3 : 0.8
+                message = "你低头喝了一口水。口渴下降 20，杯子里的水减少 25。"
+                addAudioCue(.paper, direction: "桌面近处", intensity: 0.18, note: "杯子碰到桌面的声音很轻，但老师很近时仍会被注意到。")
+            } else {
+                player.stress += 2
+                message = "你摸到水杯，里面已经不够一口了。需要课间或离座时去饮水机补水。"
+                addMonologue("连喝水都要算时机，身体需求也变成了计划题。", intensity: 0.38)
+            }
         case .snack:
             spendAttention(for: .desk, multiplier: 0.5)
             player.hunger = max(0, player.hunger - 28)
@@ -755,6 +925,21 @@ final class GameManager: ObservableObject {
             addAudioCue(.chair, direction: "桌边", intensity: 0.28, note: "抽屉只开了一条缝，却足够让身体需求变成风险。")
             addAudioCue(.wrapper, direction: "桌面偏右", intensity: teacher.isNearPlayer ? 0.78 : 0.48, note: "包装纸声比你想象中更脆，像一次小型违规。")
         case .leaveSeat:
+            if currentPeriod.isBreak {
+                beginStudentFreeRoam(
+                    duration: 300,
+                    openingMessage: "\(clockText)，课间开始。你可以自由活动 5 分钟，去走廊、饮水机、洗手间，或经过一班前方的门厅看向户外。"
+                )
+                return
+            }
+            guard leaveSeatUsedPeriods.contains(currentPeriod) == false else {
+                player.stress += 4
+                player.maskCost += 2
+                message = "这一节课你已经举手离座过一次了。再举手会变得非常显眼，只能等课间或下一节。"
+                addMonologue("规则不是只限制动作，也限制我什么时候能处理身体。", intensity: 0.48)
+                break
+            }
+            leaveSeatUsedPeriods.insert(currentPeriod)
             player.exposure += 18
             player.maskCost += 4
             player.posture = .standing
@@ -1278,7 +1463,7 @@ final class GameManager: ObservableObject {
     private func empathyReflections(kind: EndingStoryKind) -> [EmpathyReflection] {
         let classRisk = classmates.filter { $0.stress > 76 || $0.state == .crying }.count
         let teacherLoad = teacher.fatigue + teacher.kpiPressure - teacher.empathy * 0.35
-        let bodyNeed = Int(max(player.hunger, player.bladder))
+        let bodyNeed = Int(player.highestBodyNeed)
         let studentText: String
         let teacherText: String
         let familyText: String
@@ -1388,7 +1573,7 @@ final class GameManager: ObservableObject {
             EndingMetric(title: "心理消耗", value: "\(energySpent)", note: "今晚从能量池中消耗的近似值"),
             EndingMetric(title: "面具负荷", value: "\(maskLoad)", note: "维持好学生形象的心理成本"),
             EndingMetric(title: "支持缓冲", value: "\(supportBuffer)", note: "关系越强，崩溃阈值越高"),
-            EndingMetric(title: "身体需求", value: "\(Int(max(player.hunger, player.bladder)))", note: "饥饿和如厕需求会抢走注意力"),
+            EndingMetric(title: "身体需求", value: "\(Int(player.highestBodyNeed))", note: "口渴、饥饿和如厕需求会抢走注意力"),
             EndingMetric(title: "班级风险", value: "\(classRisk)", note: "仍处于高压力或崩溃边缘的同学"),
             EndingMetric(title: "记忆延续", value: "\(classmateMemory.count)", note: "重开后仍会影响关系、压力余波和怀疑"),
             EndingMetric(title: "结束时间", value: clockText, note: currentPeriod.displayName),
@@ -1451,8 +1636,17 @@ final class GameManager: ObservableObject {
     }
 
     private func applyBodyNeeds() {
+        player.thirst += currentPeriod.isBreak ? 2.0 : 3.6 * currentPeriod.fatigueMultiplier
         player.hunger += currentPeriod.isBreak ? 2.5 : 4.2 * currentPeriod.fatigueMultiplier
         player.bladder += currentPeriod.isBreak ? 1.8 : 3.1 * currentPeriod.fatigueMultiplier
+        if player.thirst > 72 {
+            player.stress += 2.2
+            player.visualAttention = max(0, player.visualAttention - 1.8)
+            if Double.random(in: 0...1) < 0.24 {
+                addAudioCue(.heartbeat, direction: "喉咙", intensity: min(0.85, player.thirst / 120), note: "口渴会让注意力变得粗糙，越想忽略越明显。")
+                addMonologue("嗓子开始发干，我才想起水杯也有容量。", intensity: 0.46)
+            }
+        }
         if player.hunger > 78 {
             player.stress += 3
             player.focusQuality = min(player.focusQuality, 0.82)
@@ -2362,7 +2556,7 @@ final class GameManager: ObservableObject {
                 stress: player.stress,
                 exposure: player.exposure,
                 support: player.support,
-                bodyNeed: max(player.hunger, player.bladder),
+                bodyNeed: player.highestBodyNeed,
                 maskCost: player.maskCost
             )
             return max(1, currentLoad >= 70 ? 1 : Int(ceil(player.stress / 35)))
@@ -2530,7 +2724,7 @@ final class GameManager: ObservableObject {
             stress: player.stress,
             exposure: player.exposure,
             support: player.support,
-            bodyNeed: max(player.hunger, player.bladder),
+            bodyNeed: player.highestBodyNeed,
             maskCost: player.maskCost
         )
         return [
@@ -2561,7 +2755,7 @@ final class GameManager: ObservableObject {
         let actionText = replay.map(\.actionLabel).joined(separator: " ")
         let peakStress = replay.map(\.stress).max() ?? player.stress
         let lowestEnergy = replay.map(\.energy).min() ?? player.psychicEnergy
-        let highestBodyNeed = replay.map(\.bodyNeed).max() ?? max(player.hunger, player.bladder)
+        let highestBodyNeed = replay.map(\.bodyNeed).max() ?? player.highestBodyNeed
         var strengths: [ReviewPoint] = []
         var improvements: [ReviewPoint] = []
 
@@ -2578,7 +2772,7 @@ final class GameManager: ObservableObject {
             strengths.append(ReviewPoint(title: "风险控制较稳", detail: "暴露值没有长期停在高位，说明你在观察、行动和收手之间做过权衡。", icon: "eye.slash.fill"))
         }
         if highestBodyNeed < 72 {
-            strengths.append(ReviewPoint(title: "身体需求未完全失控", detail: "饥饿和如厕需求没有压过全部注意力，身体报警保持在可处理范围。", icon: "figure.core.training"))
+            strengths.append(ReviewPoint(title: "身体需求未完全失控", detail: "口渴、饥饿和如厕需求没有压过全部注意力，身体报警保持在可处理范围。", icon: "figure.core.training"))
         }
         if strengths.isEmpty {
             strengths.append(ReviewPoint(title: "撑到了复盘时刻", detail: "即使过程很乱，你仍然留下了可回看的数据和选择。复盘本身就是改善入口。", icon: "checkmark.circle.fill"))
@@ -2597,7 +2791,7 @@ final class GameManager: ObservableObject {
             improvements.append(ReviewPoint(title: "暴露风险偏高", detail: "手机、纸条、零食和回头确认会叠加风险。高风险后要及时切回低暴露动作。", icon: "exclamationmark.triangle.fill"))
         }
         if highestBodyNeed > 78 {
-            improvements.append(ReviewPoint(title: "身体需求被拖太久", detail: "饥饿或如厕需求会抢走注意力。下次可以更早选择零食、举手或课间恢复。", icon: "figure.stand"))
+            improvements.append(ReviewPoint(title: "身体需求被拖太久", detail: "口渴、饥饿或如厕需求会抢走注意力。下次可以更早喝水、补水、吃零食、举手或课间恢复。", icon: "figure.stand"))
         }
         if lowestEnergy < 20 {
             improvements.append(ReviewPoint(title: "能量见底后仍在硬撑", detail: "低能量会放大同样的压力。能量低于 25 时，优先恢复比继续加速更有效。", icon: "battery.25percent"))
@@ -2632,7 +2826,7 @@ final class GameManager: ObservableObject {
         let visible = visibleSceneDescription(actionLabel: actionLabel)
         let truth = innerTruthDescription(actionLabel: actionLabel)
         let teacherView = teacherInterpretationDescription()
-        let metrics = "能量 \(Int(player.psychicEnergy)) · 压力 \(Int(player.stress)) · 面具 \(Int(player.maskCost)) · 支持 \(Int(player.support)) · 暴露 \(Int(player.exposure)) · 饥饿 \(Int(player.hunger)) · 如厕 \(Int(player.bladder))"
+        let metrics = "能量 \(Int(player.psychicEnergy)) · 压力 \(Int(player.stress)) · 面具 \(Int(player.maskCost)) · 支持 \(Int(player.support)) · 暴露 \(Int(player.exposure)) · 口渴 \(Int(player.thirst)) · 饥饿 \(Int(player.hunger)) · 如厕 \(Int(player.bladder)) · 杯水 \(Int(player.waterCup))"
         replay.append(TurnSnapshot(
             turn: currentTurn,
             actionLabel: actionLabel,
@@ -2645,7 +2839,7 @@ final class GameManager: ObservableObject {
             maskCost: player.maskCost,
             support: player.support,
             exposure: player.exposure,
-            bodyNeed: max(player.hunger, player.bladder)
+            bodyNeed: player.highestBodyNeed
         ))
         if replay.count > maxTurns + 4 {
             replay.removeFirst()
@@ -2746,8 +2940,10 @@ final class GameManager: ObservableObject {
         player.stress = player.stress.clamped(to: 0...100)
         player.exposure = player.exposure.clamped(to: 0...100)
         player.homework = player.homework.clamped(to: 0...100)
+        player.thirst = player.thirst.clamped(to: 0...100)
         player.hunger = player.hunger.clamped(to: 0...100)
         player.bladder = player.bladder.clamped(to: 0...100)
+        player.waterCup = player.waterCup.clamped(to: 0...100)
         player.visualAttention = player.visualAttention.clamped(to: 0...100)
         player.focusQuality = (player.visualAttention / 100).clamped(to: 0.18...1)
     }
