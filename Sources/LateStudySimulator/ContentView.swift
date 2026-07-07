@@ -181,7 +181,10 @@ struct ContentView: View {
             meter("压力", value: game.player.stress, color: .orange)
             meter("暴露", value: game.player.exposure, color: .red)
             meter("作业", value: game.player.homework, color: .blue)
-            meter("身体需求", value: max(game.player.hunger, game.player.bladder), color: .teal)
+            meter("口渴", value: game.player.thirst, color: .cyan)
+            meter("杯水", value: game.player.waterCup, color: .blue)
+            meter("饥饿", value: game.player.hunger, color: .yellow)
+            meter("如厕", value: game.player.bladder, color: .teal)
         }
     }
 
@@ -893,6 +896,47 @@ struct ContentView: View {
                 Text("\(game.freeRoam.remainingSeconds)s")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundStyle(.orange.opacity(0.92))
+                if let door = game.nearbyStudentDoor {
+                    let isOpen = game.isStudentDoorOpen(door)
+                    Button {
+                        game.toggleNearbyStudentDoor()
+                    } label: {
+                        Label(isOpen ? "关\(door.rawValue)" : "开\(door.rawValue)", systemImage: isOpen ? "door.left.hand.open" : "door.left.hand.closed")
+                            .frame(width: 86, height: 28)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .help(isOpen ? "关闭\(door.rawValue)" : "打开\(door.rawValue)")
+                }
+                if game.isNearPlayerLocker {
+                    Button {
+                        game.togglePlayerLocker()
+                    } label: {
+                        Label(game.playerLockerOpen ? "关柜" : "开柜", systemImage: game.playerLockerOpen ? "lock.open.fill" : "lock.fill")
+                            .frame(width: 76, height: 28)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .help(game.playerLockerOpen ? "关闭储物柜" : "打开储物柜")
+                }
+                if game.isNearWaterDispenser {
+                    Button {
+                        game.refillWaterCup()
+                    } label: {
+                        Label("接水", systemImage: "drop.fill")
+                            .frame(width: 76, height: 28)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .help("把水杯补满到 100")
+                }
+                if game.isNearRestroom {
+                    Button {
+                        game.useRestroom()
+                    } label: {
+                        Label("如厕", systemImage: "figure.stand")
+                            .frame(width: 76, height: 28)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .help("消耗 10 秒，如厕需求归零")
+                }
                 Button {
                     game.returnToSeatFromFreeRoam()
                 } label: {

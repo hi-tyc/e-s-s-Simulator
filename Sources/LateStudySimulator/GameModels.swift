@@ -243,6 +243,7 @@ enum PlayerAction: String, CaseIterable, Identifiable {
     case talk = "同桌"
     case breathe = "深呼吸"
     case window = "看窗外"
+    case drink = "喝水"
     case snack = "吃零食"
     case leaveSeat = "举手"
 
@@ -257,6 +258,7 @@ enum PlayerAction: String, CaseIterable, Identifiable {
         case .talk: return "person.2.fill"
         case .breathe: return "wind"
         case .window: return "moon.stars.fill"
+        case .drink: return "drop.fill"
         case .snack: return "takeoutbag.and.cup.and.straw.fill"
         case .leaveSeat: return "hand.raised.fill"
         }
@@ -271,8 +273,9 @@ enum PlayerAction: String, CaseIterable, Identifiable {
         case .talk: return "5"
         case .breathe: return "6"
         case .window: return "7"
-        case .snack: return "8"
-        case .leaveSeat: return "9"
+        case .drink: return "8"
+        case .snack: return "9"
+        case .leaveSeat: return "0"
         }
     }
 }
@@ -367,14 +370,20 @@ struct PlayerState {
     var focusQuality: Double = 1
     var posture: PlayerPosture = .seated
     var homework: Double = 0
+    var thirst: Double = 20
     var hunger: Double = 28
     var bladder: Double = 18
+    var waterCup: Double = 100
     var helpedClassmate: Bool = false
     var teacherWarnings: Int = 0
     var teacherCareMoments: Int = 0
 
     var breakdownRisk: Double {
         max(0, stress + maskCost * 0.45 + exposure * 0.25 - psychicEnergy - support * 0.18)
+    }
+
+    var highestBodyNeed: Double {
+        max(thirst, hunger, bladder)
     }
 }
 
@@ -388,10 +397,28 @@ struct StudentFreeRoamState {
     var endsAt: Date = .distantPast
     var hasExitedClassroom: Bool = false
     var isSideways: Bool = false
+    var frontDoorOpen: Bool = false
+    var rearDoorOpen: Bool = false
 
     var remainingSeconds: Int {
         guard isActive else { return 0 }
         return max(0, Int(ceil(endsAt.timeIntervalSinceNow)))
+    }
+}
+
+enum StudentDoor: String, CaseIterable, Identifiable {
+    case front = "前门"
+    case rear = "后门"
+
+    var id: String { rawValue }
+
+    var centerX: Double { 4.0 }
+
+    var centerZ: Double {
+        switch self {
+        case .front: return -4.65
+        case .rear: return 4.65
+        }
     }
 }
 
