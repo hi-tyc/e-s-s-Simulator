@@ -397,6 +397,7 @@ struct StudentFreeRoamState {
     var endsAt: Date = .distantPast
     var hasExitedClassroom: Bool = false
     var isSideways: Bool = false
+    var isSprinting: Bool = false
     var frontDoorOpen: Bool = false
     var rearDoorOpen: Bool = false
 

@@ -36,7 +36,11 @@ final class GameManager: ObservableObject {
     @Published var cameraPose: CameraPose = .forward
     @Published var studentLookYaw: Double = 0
     @Published var studentLookPitch: Double = 0
+    @Published var mouseLookCaptured: Bool = false
+    @Published var mouseLookEnabled: Bool = true
     @Published var freeRoam = StudentFreeRoamState()
+    @Published var isReturningToSeat: Bool = false
+    @Published var returnToSeatStartedAt: Date = .distantPast
     @Published var frontDoorOpen: Bool = false
     @Published var rearDoorOpen: Bool = false
     @Published var playerLockerOpen: Bool = false
@@ -69,8 +73,13 @@ final class GameManager: ObservableObject {
     let audio = SpatialAudioManager()
     private let memoryStoreKey = "LateStudySimulator.ClassmateMemory.v1"
     private var freeRoamTimer: Timer?
+    private var freeRoamPausedAt: Date?
+    private var returnToSeatTask: Task<Void, Never>?
+    private var pendingSprintHunger: Double = 0
     private let normalFreeRoamPlayerRadius = 0.19
     private let sidewaysFreeRoamPlayerRadius = 0.115
+    static let returnToSeatResetDelay: TimeInterval = 1.08
+    static let returnToSeatTotalDuration: TimeInterval = 1.8
 
     init() {
         audioAssetStatus = audio.assetStatus
@@ -88,8 +97,16 @@ final class GameManager: ObservableObject {
         cameraPose = .forward
         studentLookYaw = 0
         studentLookPitch = 0
+        mouseLookEnabled = true
+        mouseLookCaptured = false
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        returnToSeatStartedAt = .distantPast
+        pendingSprintHunger = 0
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
+        freeRoamPausedAt = nil
         freeRoam = StudentFreeRoamState()
         frontDoorOpen = false
         rearDoorOpen = false
@@ -126,6 +143,12 @@ final class GameManager: ObservableObject {
     func returnToMenuForNewGame() {
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        returnToSeatStartedAt = .distantPast
+        pendingSprintHunger = 0
+        freeRoamPausedAt = nil
         freeRoam = StudentFreeRoamState()
         audio.stop()
         gameState = .menu
@@ -134,6 +157,8 @@ final class GameManager: ObservableObject {
         cameraPose = .forward
         studentLookYaw = 0
         studentLookPitch = 0
+        mouseLookEnabled = true
+        mouseLookCaptured = false
         viewMode = .student
         eventLog = []
         audioCues = []
@@ -401,33 +426,41 @@ final class GameManager: ObservableObject {
     }
 
     func rotateStudentView(deltaX: Double, deltaY: Double) {
-        guard case .playing = gameState, activeRole.isTeacher == false else { return }
+        guard case .playing = gameState, activeRole.isTeacher == false, isReturningToSeat == false else { return }
         let previousPose = cameraPose
         let sensitivity = 0.006
-        studentLookYaw = normalizedAngle(studentLookYaw - deltaX * sensitivity)
-        studentLookPitch = (studentLookPitch - deltaY * sensitivity).clamped(to: -0.72...0.48)
+        let nextYaw = normalizedAngle(studentLookYaw - deltaX * sensitivity)
+        let nextPitch = (studentLookPitch - deltaY * sensitivity).clamped(to: -0.72...0.48)
+        studentLookYaw = nextYaw
+        studentLookPitch = nextPitch
         if freeRoam.isActive {
-            freeRoam.yaw = studentLookYaw
-            freeRoam.pitch = studentLookPitch
+            var nextFreeRoam = freeRoam
+            nextFreeRoam.yaw = nextYaw
+            nextFreeRoam.pitch = nextPitch
+            freeRoam = nextFreeRoam
         }
-        updateCameraPoseFromLook()
+        let nextPose = cameraPoseFromLook(yaw: nextYaw, pitch: nextPitch)
+        guard nextPose != previousPose else { return }
+        cameraPose = nextPose
         applyRearLookRiskIfNeeded(previousPose: previousPose)
-        updatePerception()
+        if freeRoam.isActive == false {
+            updatePerception()
+        }
     }
 
-    private func updateCameraPoseFromLook() {
-        if studentLookPitch < -0.38 {
-            cameraPose = .desk
-        } else if studentLookPitch > 0.25 {
-            cameraPose = .board
-        } else if abs(studentLookYaw) > 2.35 {
-            cameraPose = .rear
-        } else if studentLookYaw > 0.42 {
-            cameraPose = .left
-        } else if studentLookYaw < -0.42 {
-            cameraPose = .right
+    private func cameraPoseFromLook(yaw: Double, pitch: Double) -> CameraPose {
+        if abs(yaw) > 2.35 {
+            return .rear
+        } else if pitch < -0.38 {
+            return .desk
+        } else if pitch > 0.25 {
+            return .board
+        } else if yaw > 0.42 {
+            return .left
+        } else if yaw < -0.42 {
+            return .right
         } else {
-            cameraPose = .forward
+            return .forward
         }
     }
 
@@ -446,6 +479,20 @@ final class GameManager: ObservableObject {
         clampPlayer()
     }
 
+    func setMouseLookEnabled(_ enabled: Bool) {
+        guard activeRole.isTeacher == false else { return }
+        mouseLookEnabled = enabled
+        mouseLookCaptured = false
+    }
+
+    func recenterStudentView() {
+        guard case .playing = gameState, activeRole.isTeacher == false, freeRoam.isActive == false, isReturningToSeat == false else { return }
+        studentLookYaw = 0
+        studentLookPitch = 0
+        cameraPose = .forward
+        updatePerception()
+    }
+
     private func normalizedAngle(_ angle: Double) -> Double {
         var value = angle
         while value > .pi { value -= .pi * 2 }
@@ -456,6 +503,12 @@ final class GameManager: ObservableObject {
     private func beginStudentFreeRoam(duration: TimeInterval = 60, openingMessage: String? = nil) {
         guard activeRole.isTeacher == false else { return }
         freeRoamTimer?.invalidate()
+        freeRoamPausedAt = nil
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        returnToSeatStartedAt = .distantPast
+        pendingSprintHunger = 0
         let now = Date()
         studentLookYaw = 0
         studentLookPitch = 0
@@ -469,12 +522,13 @@ final class GameManager: ObservableObject {
             endsAt: now.addingTimeInterval(duration),
             hasExitedClassroom: false,
             isSideways: false,
+            isSprinting: false,
             frontDoorOpen: frontDoorOpen,
             rearDoorOpen: rearDoorOpen
         )
         player.posture = .standing
         gameState = .playing
-        message = openingMessage ?? "老师点头同意。你获得 \(Int(duration)) 秒离座活动时间，可以按住画面拖动调整方向，按住空格朝当前方向往前走；靠近前后门时可以开门或关门。"
+        message = openingMessage ?? "老师点头同意。你获得 \(Int(duration)) 秒离座活动时间，移动鼠标调整方向，使用 WASD 行走；靠近前后门时可以开门或关门。"
         addAudioCue(.chair, direction: "座位到过道", intensity: 0.56, note: "获批离座后，椅子声从违规风险变成了被允许的移动声。")
         freeRoamTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -484,25 +538,37 @@ final class GameManager: ObservableObject {
     }
 
     func moveStudentFreeRoam(forward: Double, strafe: Double, deltaTime: Double) {
-        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false, isReturningToSeat == false else { return }
         let baseSpeed = freeRoam.hasExitedClassroom ? 1.7 : 1.45
-        let speed = freeRoam.isSideways ? baseSpeed * 0.58 : baseSpeed
+        let postureSpeed = freeRoam.isSideways ? baseSpeed * 0.58 : baseSpeed
+        let speed = freeRoam.isSprinting ? postureSpeed * 1.7 : postureSpeed
         let yaw = freeRoam.yaw
         let distance = speed * deltaTime
+        let inputLength = hypot(forward, strafe)
+        let normalizedForward = inputLength > 1 ? forward / inputLength : forward
+        let normalizedStrafe = inputLength > 1 ? strafe / inputLength : strafe
         let forwardX = -sin(yaw)
         let forwardZ = -cos(yaw)
         let rightX = cos(yaw)
         let rightZ = -sin(yaw)
-        let nextX = freeRoam.positionX + (forwardX * forward + rightX * strafe) * distance
-        let nextZ = freeRoam.positionZ + (forwardZ * forward + rightZ * strafe) * distance
+        let nextX = freeRoam.positionX + (forwardX * normalizedForward + rightX * normalizedStrafe) * distance
+        let nextZ = freeRoam.positionZ + (forwardZ * normalizedForward + rightZ * normalizedStrafe) * distance
         let resolved = resolvedFreeRoamPosition(fromX: freeRoam.positionX, fromZ: freeRoam.positionZ, toX: nextX, toZ: nextZ)
-        freeRoam.positionX = resolved.x
-        freeRoam.positionZ = resolved.z
+        let actualDistance = hypot(resolved.x - freeRoam.positionX, resolved.z - freeRoam.positionZ)
+        var nextFreeRoam = freeRoam
+        nextFreeRoam.positionX = resolved.x
+        nextFreeRoam.positionZ = resolved.z
         if resolved.x > 4.08 {
-            freeRoam.hasExitedClassroom = true
+            nextFreeRoam.hasExitedClassroom = true
             player.stress = max(0, player.stress - 0.05)
         }
-        objectWillChange.send()
+        freeRoam = nextFreeRoam
+        if nextFreeRoam.isSprinting && actualDistance > 0 {
+            pendingSprintHunger += actualDistance * 0.18
+            if pendingSprintHunger >= 0.25 {
+                flushSprintHunger()
+            }
+        }
     }
 
     var nearbyStudentDoor: StudentDoor? {
@@ -525,8 +591,9 @@ final class GameManager: ObservableObject {
         }
     }
 
-    func toggleNearbyStudentDoor() {
-        guard let door = nearbyStudentDoor else { return }
+    @discardableResult
+    func interactWithNearbyDoor() -> Bool {
+        guard let door = nearbyStudentDoor else { return false }
         let willOpen = isStudentDoorOpen(door) == false
         let didPushPlayer = willOpen ? false : pushPlayerOutOfDoorwayBeforeClosing(door)
         switch door {
@@ -551,6 +618,7 @@ final class GameManager: ObservableObject {
         }
         clampPlayer()
         objectWillChange.send()
+        return true
     }
 
     var isNearPlayerLocker: Bool {
@@ -583,7 +651,8 @@ final class GameManager: ObservableObject {
         guard isNearWaterDispenser else { return }
         player.waterCup = 100
         player.exposure += currentPeriod.isBreak ? 0.2 : 1.2
-        message = "你在饮水机旁把水杯接满。杯里的水回到 100，之后可以在座位上继续喝。"
+        spendFreeRoamSeconds(10)
+        message = "你在饮水机旁把水杯接满，消耗 10 秒。杯里的水回到 100，之后可以在座位上继续喝。"
         addAudioCue(.knock, direction: "走廊饮水机", intensity: 0.2, note: "水流声很轻，课间会被走廊声盖住。")
         clampPlayer()
         objectWillChange.send()
@@ -591,9 +660,9 @@ final class GameManager: ObservableObject {
 
     var isNearRestroom: Bool {
         guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return false }
-        let dx = freeRoam.positionX - 6.12
-        let dz = freeRoam.positionZ - 5.85
-        return sqrt(dx * dx + dz * dz) <= 1.05
+        let dx = freeRoam.positionX - 7.02
+        let dz = freeRoam.positionZ - 6.12
+        return sqrt(dx * dx + dz * dz) <= 0.48
     }
 
     func useRestroom() {
@@ -601,28 +670,30 @@ final class GameManager: ObservableObject {
         player.bladder = 0
         player.stress = max(0, player.stress - 8)
         player.psychicEnergy = min(100, player.psychicEnergy + 4)
-        let remaining = max(0, freeRoam.endsAt.timeIntervalSinceNow - 10)
-        freeRoam.endsAt = Date().addingTimeInterval(remaining)
+        spendFreeRoamSeconds(10)
         freeRoam.hasExitedClassroom = true
-        message = "你进入洗手间，过程消耗 10 秒。如厕需求归零，身体终于不用继续和注意力抢位置。"
+        message = "你进入洗手间并靠近马桶后才完成如厕，过程消耗 10 秒。如厕需求归零，身体终于不用继续和注意力抢位置。"
         addAudioCue(.footstep, direction: "洗手间门口", intensity: 0.24, note: "洗手间里的脚步被墙面削弱，离开教室后的声音边界变远。")
         addMonologue("不是我矫情，是身体真的需要被允许处理。", intensity: 0.42)
         clampPlayer()
         objectWillChange.send()
     }
 
+    private func spendFreeRoamSeconds(_ seconds: TimeInterval) {
+        let remaining = max(0, freeRoam.endsAt.timeIntervalSinceNow - seconds)
+        freeRoam.endsAt = Date().addingTimeInterval(remaining)
+    }
+
     private func pushPlayerOutOfDoorwayBeforeClosing(_ door: StudentDoor) -> Bool {
-        let doorHalfDepth = 0.48
-        let doorHalfWidth = 0.14
         let radius = currentFreeRoamPlayerRadius
-        let overlapsDoorDepth = abs(freeRoam.positionZ - door.centerZ) <= doorHalfDepth + radius
-        let overlapsDoorWidth = abs(freeRoam.positionX - door.centerX) <= doorHalfWidth + radius
+        let overlapsDoorDepth = abs(freeRoam.positionZ - door.centerZ) <= 0.5 + radius
+        let overlapsDoorWidth = freeRoam.positionX >= 3.9 - radius && freeRoam.positionX <= 4.52 + radius
         guard overlapsDoorDepth && overlapsDoorWidth else { return false }
 
-        let pushToCorridor = freeRoam.positionX >= door.centerX
+        let pushToCorridor = freeRoam.positionX >= 4.18
         let clearX = pushToCorridor
-            ? door.centerX + doorHalfWidth + radius + 0.04
-            : door.centerX - doorHalfWidth - radius - 0.15
+            ? 4.52 + radius + 0.04
+            : 3.9 - radius - 0.04
         let clampedZ = freeRoam.positionZ.clamped(to: (door.centerZ - 0.34)...(door.centerZ + 0.34))
         freeRoam.positionX = clearX
         freeRoam.positionZ = clampedZ
@@ -658,7 +729,8 @@ final class GameManager: ObservableObject {
     }
 
     func setFreeRoamSideways(_ isSideways: Bool) {
-        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard isReturningToSeat == false || isSideways == false else { return }
         guard freeRoam.isSideways != isSideways else { return }
         freeRoam.isSideways = isSideways
         if isSideways {
@@ -670,12 +742,40 @@ final class GameManager: ObservableObject {
         clampPlayer()
     }
 
+    func setFreeRoamSprinting(_ isSprinting: Bool) {
+        guard freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard isReturningToSeat == false || isSprinting == false else { return }
+        guard freeRoam.isSprinting != isSprinting else { return }
+        freeRoam.isSprinting = isSprinting
+        if isSprinting {
+            message = "你加快脚步开始疾跑。移动更快，但身体会更快感到饥饿。"
+        } else {
+            flushSprintHunger()
+            message = "你放慢脚步，恢复普通行走速度。"
+        }
+    }
+
+    func clearFreeRoamMovementModifiers() {
+        guard freeRoam.isActive else { return }
+        if freeRoam.isSprinting {
+            flushSprintHunger()
+        }
+        freeRoam.isSprinting = false
+        freeRoam.isSideways = false
+    }
+
+    private func flushSprintHunger() {
+        guard pendingSprintHunger > 0 else { return }
+        player.hunger = min(100, player.hunger + pendingSprintHunger)
+        pendingSprintHunger = 0
+    }
+
     private var freeRoamWalkableRegions: [FreeRoamRect] {
         [
             FreeRoamRect(minX: -3.55, maxX: 3.72, minZ: -5.55, maxZ: 5.55),
             FreeRoamRect(minX: 3.35, maxX: 6.22, minZ: -11.35, maxZ: 8.18),
             FreeRoamRect(minX: 2.22, maxX: 4.02, minZ: -10.2, maxZ: -8.5),
-            FreeRoamRect(minX: 6.0, maxX: 7.16, minZ: 5.35, maxZ: 6.38)
+            FreeRoamRect(minX: 5.72, maxX: 7.2, minZ: 5.32, maxZ: 6.38)
         ]
     }
 
@@ -701,12 +801,8 @@ final class GameManager: ObservableObject {
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 0.85, width: 0.16, length: 5.4))
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 5.61, width: 0.16, length: 0.8))
 
-        if frontDoorOpen == false {
-            obstacles.append(expandedObstacle(centerX: StudentDoor.front.centerX, centerZ: StudentDoor.front.centerZ, width: 0.28, length: 0.96))
-        }
-        if rearDoorOpen == false {
-            obstacles.append(expandedObstacle(centerX: StudentDoor.rear.centerX, centerZ: StudentDoor.rear.centerZ, width: 0.28, length: 0.96))
-        }
+        obstacles.append(contentsOf: doorLeafObstacles(for: .front))
+        obstacles.append(contentsOf: doorLeafObstacles(for: .rear))
 
         obstacles.append(expandedObstacle(centerX: 3.88, centerZ: -7.25, width: 0.36, length: 3.86))
         obstacles.append(expandedObstacle(centerX: 3.88, centerZ: 7.25, width: 0.36, length: 3.86))
@@ -721,7 +817,42 @@ final class GameManager: ObservableObject {
             obstacles.append(expandedObstacle(centerX: 6.55, centerZ: lockerZ, width: 0.5, length: 0.42))
         }
 
+        let teacherPosition = teacherFreeRoamPosition
+        obstacles.append(expandedObstacle(centerX: teacherPosition.x, centerZ: teacherPosition.z, width: 0.66, length: 0.62))
+
         return obstacles
+    }
+
+    private func doorLeafObstacles(for door: StudentDoor) -> [FreeRoamRect] {
+        if isStudentDoorOpen(door) {
+            return [
+                expandedObstacle(centerX: 4.31, centerZ: door.centerZ - 0.43, width: 0.37, length: 0.08),
+                expandedObstacle(centerX: 4.31, centerZ: door.centerZ + 0.43, width: 0.37, length: 0.08)
+            ]
+        }
+        return [
+            expandedObstacle(centerX: 4.02, centerZ: door.centerZ - 0.19, width: 0.08, length: 0.37),
+            expandedObstacle(centerX: 4.02, centerZ: door.centerZ + 0.19, width: 0.08, length: 0.37)
+        ]
+    }
+
+    func isDoorBlockingFreeRoamPosition(_ door: StudentDoor, x: Double, z: Double) -> Bool {
+        doorLeafObstacles(for: door).contains { $0.intersectsCircle(x: x, z: z, radius: currentFreeRoamPlayerRadius) }
+    }
+
+    var teacherFreeRoamPosition: (x: Double, z: Double) {
+        let path: [(x: Double, z: Double)] = [
+            (-2.7, -4.25), (2.6, -3.2), (2.6, -1.2),
+            (1.2, 0.45), (0.2, 1.55), (-2.2, 0.4),
+            (-2.8, -1.4), (0, -4.35), (-3.45, 4.25)
+        ]
+        return path[min(max(teacher.positionIndex, 0), path.count - 1)]
+    }
+
+    func isTeacherBlockingFreeRoamPosition(x: Double, z: Double) -> Bool {
+        let position = teacherFreeRoamPosition
+        let obstacle = expandedObstacle(centerX: position.x, centerZ: position.z, width: 0.66, length: 0.62)
+        return obstacle.intersectsCircle(x: x, z: z, radius: currentFreeRoamPlayerRadius)
     }
 
     private func expandedObstacle(centerX: Double, centerZ: Double, width: Double, length: Double) -> FreeRoamRect {
@@ -739,6 +870,7 @@ final class GameManager: ObservableObject {
             freeRoamTimer = nil
             return
         }
+        guard case .playing = gameState else { return }
         if freeRoam.remainingSeconds <= 0 {
             returnToSeatFromFreeRoam(reason: "时间到了，你回到座位。走廊里的空气留在身后，晚自习重新包围过来。")
         } else {
@@ -747,15 +879,46 @@ final class GameManager: ObservableObject {
     }
 
     func returnToSeatFromFreeRoam(reason: String? = nil) {
-        guard freeRoam.isActive else { return }
+        guard freeRoam.isActive, isReturningToSeat == false else { return }
         let exitedClassroom = freeRoam.hasExitedClassroom
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
+        freeRoamPausedAt = nil
+        flushSprintHunger()
+        clearFreeRoamMovementModifiers()
+        isReturningToSeat = true
+        returnToSeatStartedAt = Date()
+        message = reason ?? "你转身沿原路回座。脚步声逐渐靠近教室，视野在短暂闭合后重新落回桌面。"
+        addAudioCue(.footstep, direction: freeRoam.hasExitedClassroom ? "走廊到教室" : "座位过道", intensity: 0.46, note: "回座的脚步由远及近，在闭眼的瞬间与教室环境声重新重合。")
+        returnToSeatTask?.cancel()
+        returnToSeatTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(GameManager.returnToSeatResetDelay * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, self.isReturningToSeat else { return }
+            self.completeReturnToSeat(exitedClassroom: exitedClassroom, reason: reason)
+            do {
+                let revealDuration = GameManager.returnToSeatTotalDuration - GameManager.returnToSeatResetDelay
+                try await Task.sleep(nanoseconds: UInt64(revealDuration * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard self.isReturningToSeat else { return }
+            self.isReturningToSeat = false
+            self.returnToSeatStartedAt = .distantPast
+            self.returnToSeatTask = nil
+        }
+    }
+
+    private func completeReturnToSeat(exitedClassroom: Bool, reason: String?) {
         freeRoam = StudentFreeRoamState()
         studentLookYaw = 0
         studentLookPitch = 0
         cameraPose = .forward
         player.posture = .seated
+        addAudioCue(.chair, direction: "座位下方", intensity: 0.38, note: "椅子轻响标记了回座动作真正完成。")
 
         if exitedClassroom {
             player.psychicEnergy += 16
@@ -1108,6 +1271,7 @@ final class GameManager: ObservableObject {
         currentTurn += 1
         currentPhase = .observation
         gameState = .playing
+        resumeFreeRoamAfterEvent()
         player.psychicEnergy = min(100, player.psychicEnergy + 4 + player.support / 30)
         recoverAttention(20)
         player.maskCost += 2
@@ -1697,6 +1861,12 @@ final class GameManager: ObservableObject {
             appendEvent(title: period.displayName, detail: "短暂休息让教室的紧绷松开一点。")
             addAudioCue(.chair, direction: "教室四周", intensity: 0.48, note: "课间椅子声和低语短暂盖过了纪律。")
             message = "\(clockText)，\(period.displayName)。所有人都像终于被允许呼吸了一下。"
+            if activeRole.isTeacher == false && freeRoam.isActive == false {
+                beginStudentFreeRoam(
+                    duration: 300,
+                    openingMessage: "\(clockText)，\(period.displayName)。课间自动开始，你可以自由活动 5 分钟；去接水、上厕所，或到一班前方左转门厅看向户外。"
+                )
+            }
         case .third:
             player.stress += 8
             teacher.fatigue += 8
@@ -2130,8 +2300,23 @@ final class GameManager: ObservableObject {
         }
     }
 
-    private func presentEvent(kind: ActiveEventKind, title: String, body: String, choices: [EventChoice]) {
+    func presentEvent(kind: ActiveEventKind, title: String, body: String, choices: [EventChoice]) {
+        pauseFreeRoamForEvent()
         gameState = .event(ActiveEvent(kind: kind, title: title, body: body, choices: choices))
+    }
+
+    private func pauseFreeRoamForEvent() {
+        guard freeRoam.isActive, freeRoamPausedAt == nil else { return }
+        freeRoamPausedAt = Date()
+    }
+
+    private func resumeFreeRoamAfterEvent() {
+        guard freeRoam.isActive, let pausedAt = freeRoamPausedAt else {
+            freeRoamPausedAt = nil
+            return
+        }
+        freeRoam.endsAt = freeRoam.endsAt.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+        freeRoamPausedAt = nil
     }
 
     func resolveEventChoice(_ choice: EventChoice) {

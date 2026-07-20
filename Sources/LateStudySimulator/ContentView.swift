@@ -37,6 +37,8 @@ struct ContentView: View {
             if isPerceptionPanelPresented {
                 perceptionPanel
             }
+
+            returnToSeatTransitionLayer
         }
         .foregroundStyle(.white)
     }
@@ -839,73 +841,99 @@ struct ContentView: View {
                 studentControlHint
             }
 
-            HStack(spacing: 10) {
-                if game.activeRole.isTeacher {
-                    ForEach(TeacherAction.allCases) { action in
-                        Button {
-                            game.executeTeacherAction(action)
-                        } label: {
-                            actionLabel(icon: action.icon, text: action.rawValue)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if game.activeRole.isTeacher {
+                        ForEach(TeacherAction.allCases) { action in
+                            Button {
+                                game.executeTeacherAction(action)
+                            } label: {
+                                actionLabel(icon: action.icon, text: action.rawValue)
+                            }
+                            .buttonStyle(ActionButtonStyle())
+                            .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
+                            .help("\(action.rawValue) · \(String(action.shortcut))")
                         }
-                        .buttonStyle(ActionButtonStyle())
-                        .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
-                        .help("\(action.rawValue) · \(String(action.shortcut))")
-                    }
-                } else if game.freeRoam.isActive {
-                    Text("自由活动中：拖动鼠标调整方向，空格前进，Shift 侧身；回座后继续晚自习。")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .frame(height: 58)
-                } else {
-                    ForEach(PlayerAction.allCases) { action in
-                        Button {
-                            game.execute(action)
-                        } label: {
-                            actionLabel(icon: action.icon, text: action.rawValue)
+                    } else if game.freeRoam.isActive {
+                        Text("自由活动中：WASD 行走，Shift 侧身，Control 疾跑；按 ~ 可释放或捕获鼠标。")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .frame(height: 44)
+                    } else {
+                        ForEach(PlayerAction.allCases) { action in
+                            Button {
+                                game.execute(action)
+                            } label: {
+                                actionLabel(icon: action.icon, text: action.rawValue)
+                            }
+                            .buttonStyle(ActionButtonStyle())
+                            .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
+                            .help("\(action.rawValue) · \(String(action.shortcut))")
                         }
-                        .buttonStyle(ActionButtonStyle())
-                        .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
-                        .help("\(action.rawValue) · \(String(action.shortcut))")
                     }
                 }
+                .padding(.horizontal, 2)
             }
+            .frame(maxWidth: .infinity, minHeight: 52)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
         .liquidGlassPanel()
     }
 
     private var studentControlHint: some View {
         HStack(spacing: 10) {
-            Label("按住画面拖动视角", systemImage: "cursorarrow.motionlines")
+            Label(game.mouseLookCaptured ? "移动鼠标自由环视" : "鼠标已释放", systemImage: "cursorarrow.motionlines")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.cyan.opacity(0.88))
+            Label(game.mouseLookCaptured ? "~ 释放鼠标" : "~ 捕获视角", systemImage: "keyboard.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.72))
             Text("\(game.cameraPose.rawValue) · \(game.cameraPose.visionZone.displayName)")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.62))
+
+            Button {
+                game.setMouseLookEnabled(!game.mouseLookEnabled)
+            } label: {
+                Label(game.mouseLookEnabled ? "释放视角" : "捕获视角", systemImage: game.mouseLookEnabled ? "cursorarrow.slash" : "cursorarrow.motionlines")
+                    .frame(minWidth: 74, minHeight: 26)
+            }
+            .buttonStyle(SegmentButtonStyle(isSelected: game.mouseLookEnabled))
+            .help(game.mouseLookEnabled ? "释放鼠标视角，允许操作界面" : "捕获鼠标视角")
+
+            Button {
+                game.recenterStudentView()
+            } label: {
+                Label("回到前方", systemImage: "arrow.uturn.backward.circle")
+                    .frame(minWidth: 74, minHeight: 26)
+            }
+            .buttonStyle(SegmentButtonStyle(isSelected: game.cameraPose == .forward))
+            .help("把学生视角回到前方")
 
             if game.freeRoam.isActive {
                 Divider()
                     .frame(height: 20)
                     .overlay(.white.opacity(0.22))
-                Label("空格前进", systemImage: "keyboard.fill")
+                Label("WASD移动", systemImage: "keyboard.fill")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.mint.opacity(0.9))
                 Label(game.freeRoam.isSideways ? "侧身中" : "Shift侧身", systemImage: "rectangle.compress.vertical")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(game.freeRoam.isSideways ? .orange.opacity(0.92) : .white.opacity(0.62))
+                Label(game.freeRoam.isSprinting ? "疾跑中" : "Control疾跑", systemImage: "figure.run")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(game.freeRoam.isSprinting ? .yellow.opacity(0.94) : .white.opacity(0.62))
                 Text("\(game.freeRoam.remainingSeconds)s")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundStyle(.orange.opacity(0.92))
                 if let door = game.nearbyStudentDoor {
                     let isOpen = game.isStudentDoorOpen(door)
-                    Button {
-                        game.toggleNearbyStudentDoor()
-                    } label: {
-                        Label(isOpen ? "关\(door.rawValue)" : "开\(door.rawValue)", systemImage: isOpen ? "door.left.hand.open" : "door.left.hand.closed")
-                            .frame(width: 86, height: 28)
-                    }
-                    .buttonStyle(ActionButtonStyle())
-                    .help(isOpen ? "关闭\(door.rawValue)" : "打开\(door.rawValue)")
+                    Label("E · \(isOpen ? "关" : "开")\(door.rawValue)", systemImage: isOpen ? "door.left.hand.open" : "door.left.hand.closed")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.cyan.opacity(0.94))
+                        .frame(minWidth: 88, minHeight: 28)
                 }
                 if game.isNearPlayerLocker {
                     Button {
@@ -921,21 +949,21 @@ struct ContentView: View {
                     Button {
                         game.refillWaterCup()
                     } label: {
-                        Label("接水", systemImage: "drop.fill")
-                            .frame(width: 76, height: 28)
+                        Label("接水10s", systemImage: "drop.fill")
+                            .frame(width: 86, height: 28)
                     }
                     .buttonStyle(ActionButtonStyle())
-                    .help("把水杯补满到 100")
+                    .help("消耗 10 秒，把水杯补满到 100")
                 }
                 if game.isNearRestroom {
                     Button {
                         game.useRestroom()
                     } label: {
-                        Label("如厕", systemImage: "figure.stand")
-                            .frame(width: 76, height: 28)
+                        Label("如厕10s", systemImage: "figure.stand")
+                            .frame(width: 86, height: 28)
                     }
                     .buttonStyle(ActionButtonStyle())
-                    .help("消耗 10 秒，如厕需求归零")
+                    .help("进入厕所并靠近马桶后，消耗 10 秒，如厕需求归零")
                 }
                 Button {
                     game.returnToSeatFromFreeRoam()
@@ -945,6 +973,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(ActionButtonStyle())
                 .keyboardShortcut(.return, modifiers: [])
+                .disabled(game.isReturningToSeat)
             }
         }
         .padding(.horizontal, 10)
@@ -955,11 +984,11 @@ struct ContentView: View {
     private func actionLabel(icon: String, text: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
             Text(text)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
         }
-        .frame(width: 82, height: 58)
+        .frame(width: 74, height: 44)
     }
 
     private var peripheralIndicators: some View {
@@ -990,6 +1019,97 @@ struct ContentView: View {
                 )
             )
             .allowsHitTesting(false)
+    }
+
+    private var returnToSeatTransitionLayer: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: game.isReturningToSeat == false)) { timeline in
+            GeometryReader { proxy in
+                let progress = returnToSeatProgress(at: timeline.date)
+                let motion = smoothStep(from: 0.04, to: 0.25, value: progress) * (1 - smoothStep(from: 0.48, to: 0.66, value: progress))
+                let closing = smoothStep(from: 0.24, to: 0.6, value: progress)
+                let reopening = smoothStep(from: 0.69, to: 1, value: progress)
+                let eyelidClosure = max(0, closing - reopening)
+                let blackout = smoothStep(from: 0.3, to: 0.61, value: progress) * (1 - smoothStep(from: 0.72, to: 1, value: progress))
+                let revealGlow = smoothStep(from: 0.7, to: 0.84, value: progress) * (1 - smoothStep(from: 0.88, to: 1, value: progress))
+
+                ZStack {
+                    Color.black
+                        .opacity(game.isReturningToSeat ? 0.18 + blackout * 0.7 : 0)
+
+                    ForEach(0..<14, id: \.self) { index in
+                        let lane = Double(index) / 13
+                        let travel = (progress * 2.4 + lane).truncatingRemainder(dividingBy: 1)
+                        Capsule()
+                            .fill(index.isMultiple(of: 3) ? Color.cyan.opacity(0.42) : (index.isMultiple(of: 2) ? Color.orange.opacity(0.34) : Color.white.opacity(0.3)))
+                            .frame(width: 48 + CGFloat(index % 5) * 18, height: index.isMultiple(of: 4) ? 2.2 : 1.2)
+                            .rotationEffect(.degrees(index.isMultiple(of: 2) ? -8 : 7))
+                            .position(
+                                x: proxy.size.width * (0.08 + 0.84 * lane),
+                                y: proxy.size.height * (0.12 + 0.76 * travel)
+                            )
+                            .blur(radius: index.isMultiple(of: 3) ? 1.4 : 0.5)
+                            .opacity(motion * (0.28 + Double(index % 4) * 0.08))
+                    }
+
+                    Rectangle()
+                        .fill(.white.opacity(revealGlow * 0.16))
+
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(.black)
+                            .frame(height: proxy.size.height * 0.5 * eyelidClosure + 1)
+                        Spacer(minLength: 0)
+                        Rectangle()
+                            .fill(.black)
+                            .frame(height: proxy.size.height * 0.5 * eyelidClosure + 1)
+                    }
+
+                    Rectangle()
+                        .fill(.white.opacity(0.28 * eyelidClosure * (1 - blackout)))
+                        .frame(height: 1)
+                        .blur(radius: 1.5)
+
+                    VStack(spacing: 10) {
+                        HStack(spacing: 9) {
+                            Rectangle()
+                                .fill(.white.opacity(0.42))
+                                .frame(width: 34, height: 1)
+                            Image(systemName: progress < 0.62 ? "figure.walk.motion" : "chair.fill")
+                                .font(.system(size: 19, weight: .semibold))
+                            Rectangle()
+                                .fill(.white.opacity(0.42))
+                                .frame(width: 34, height: 1)
+                        }
+                        Text(returnToSeatPhaseText(progress: progress))
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.86))
+                    .offset(y: CGFloat(sin(progress * .pi * 8)) * 2.5)
+                    .opacity(game.isReturningToSeat ? min(1, motion + blackout * 0.72) * (1 - reopening) : 0)
+                }
+                .allowsHitTesting(game.isReturningToSeat)
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func returnToSeatProgress(at date: Date) -> Double {
+        guard game.isReturningToSeat else { return 0 }
+        return (date.timeIntervalSince(game.returnToSeatStartedAt) / GameManager.returnToSeatTotalDuration).clamped(to: 0...1)
+    }
+
+    private func returnToSeatPhaseText(progress: Double) -> String {
+        if progress < 0.28 {
+            return "转身，沿原路折返"
+        } else if progress < 0.62 {
+            return "脚步重新进入教室"
+        }
+        return "坐回桌前，呼吸慢下来"
+    }
+
+    private func smoothStep(from start: Double, to end: Double, value: Double) -> Double {
+        let amount = ((value - start) / (end - start)).clamped(to: 0...1)
+        return amount * amount * (3 - 2 * amount)
     }
 
     private var eventCinematicLayer: some View {
