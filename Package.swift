@@ -15,9 +15,17 @@ let package = Package(
             name: "LateStudySimulator",
             path: "Sources/LateStudySimulator",
             resources: [
+                .copy("Resources/ATTRIBUTION.md"),
                 .copy("Resources/AudioCues"),
-                .copy("Resources/AudioLoops")
+                .copy("Resources/AudioLoops"),
+                .copy("Resources/Models"),
+                .copy("Resources/HDRI"),
+                .copy("Resources/SupportResources")
             ]
+        ),
+        .testTarget(
+            name: "LateStudySimulatorTests",
+            dependencies: ["LateStudySimulator"]
         )
     ]
 )

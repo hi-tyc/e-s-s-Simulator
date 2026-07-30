@@ -4,17 +4,47 @@ struct ContentView: View {
     @EnvironmentObject private var game: GameManager
     @State private var isPerceptionPanelPresented = false
 
+    private var currentSoundscape: SensorySoundscape {
+        game.currentSensorySoundscape
+    }
+
+    private var currentPeerCue: SensoryPeerCue? {
+        game.sensoryPeerCue
+    }
+
+    private var currentSpatialObjective: SpatialAudioObjective? {
+        game.currentSpatialAudioObjective
+    }
+
     var body: some View {
         ZStack {
             ClassroomSceneView(game: game)
                 .ignoresSafeArea()
 
             vignette
-            peripheralIndicators
-            eventCinematicLayer
+            if let feedback = game.focusFeedbackTrigger {
+                FocusFeedbackOverlay(feedback: feedback, reduceMotion: game.accessibilityPreferences.reduceMotion)
+                    .allowsHitTesting(false)
+                    .zIndex(12)
+            }
+            if game.isPrologueActive == false {
+                peripheralIndicators
+                eventCinematicLayer
+            }
 
-            if case .menu = game.gameState {
+            if game.narrativeCampaign.isActive {
+                NarrativeCampaignView(game: game)
+                    .zIndex(15)
+                if let microGame = game.activeNarrativeMicroGame {
+                    MicroGameOverlayView(game: game, miniGame: microGame)
+                        .zIndex(38)
+                }
+            } else if case .menu = game.gameState {
                 menuOverlay
+            } else if game.isPrologueActive {
+                prologueHUD
+            } else if game.isFullNarrativeRun, game.shouldUseMinimalNarrativeHUD == false {
+                fullNarrativeGameplayHUD
             } else {
                 VStack(spacing: 0) {
                     topHUD
@@ -26,25 +56,296 @@ struct ContentView: View {
                 .padding(18)
             }
 
-            if case .event(let event) = game.gameState {
+            if game.narrativeCampaign.isActive == false, case .event(let event) = game.gameState {
                 eventOverlay(event)
             }
 
-            if case .ending(let ending) = game.gameState {
+            if game.narrativeCampaign.isActive == false, case .ending(let ending) = game.gameState {
                 endingOverlay(ending)
             }
 
             if isPerceptionPanelPresented {
                 perceptionPanel
             }
+
+            if game.isAccessibilityPanelPresented {
+                accessibilityPanel
+                    .zIndex(90)
+            }
+
+            if game.isPrologueActive && game.prologuePaused && game.isAccessibilityPanelPresented == false {
+                prologuePauseOverlay
+                    .zIndex(82)
+            }
+
+            if game.shouldShowNarrativePauseOverlay && game.isAccessibilityPanelPresented == false {
+                narrativePauseOverlay
+                    .zIndex(84)
+            }
+
+            if game.isDeveloperPanelPresented {
+                developerPanel
+                    .zIndex(60)
+            }
+
+            returnToSeatTransitionLayer
+
+            if let monologue = game.featuredMonologue {
+                featuredMonologueLayer(monologue)
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
+
+            if game.scenePresentation.isActive {
+                scenePresentationLayer
+                    .zIndex(70)
+            }
+
+            if game.shouldUseMinimalNarrativeHUD {
+                narrativeMinimalHUDOverlay
+                    .zIndex(72)
+            }
+
+            if shouldShowMainQuestHUD {
+                mainQuestHUDOverlay
+                    .zIndex(73)
+            }
+
+            if game.isAutonomousPlayEnabled,
+               game.scenePresentation.isActive == false,
+               game.featuredMonologue == nil {
+                autonomousDirectorOverlay
+                    .zIndex(74)
+            }
+        }
+        .animation(.easeInOut(duration: 0.55), value: game.featuredMonologue?.id)
+        .onChange(of: game.accessibilityPreferences) { _, _ in
+            game.accessibilityPreferencesDidChange()
         }
         .foregroundStyle(.white)
+    }
+
+    private var autonomousDirectorOverlay: some View {
+        VStack {
+            Spacer()
+            HStack(alignment: .bottom) {
+                AutonomousDirectorOverlay(
+                    status: game.autonomousPlayStatus,
+                    decision: game.autonomousPlayLastDecision,
+                    stepCount: game.autonomousPlayStepCount,
+                    soundscape: currentSoundscape,
+                    peerCue: currentPeerCue,
+                    latestEntry: game.playtestRouteTranscript.last,
+                    onTakeover: {
+                        game.stopAutonomousPlay(reason: "玩家接管")
+                    }
+                )
+                .frame(width: 370)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 92)
+        }
+        .allowsHitTesting(true)
+    }
+
+    private var shouldShowMainQuestHUD: Bool {
+        game.scenePresentation.isActive == false
+            && game.featuredMonologue == nil
+            && game.isPrologueActive == false
+            && game.narrativeCampaign.isComplete == false
+            && game.isAccessibilityPanelPresented == false
+            && game.narrativePaused == false
+            && game.isDeveloperPanelPresented == false
+            && game.activeRole.isTeacher == false
+            && (game.narrativeCampaign.isActive || game.gameState == .playing)
+    }
+
+    private var mainQuestHUDOverlay: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MainQuestHUD(
+                item: mainQuestHUDItem,
+                reduceMotion: game.accessibilityPreferences.reduceMotion
+            )
+            if game.activeRole.isTeacher == false {
+                ClassroomSupportWeatherStripView(
+                    classmates: game.classmates,
+                    playerSupport: game.player.support
+                )
+                .frame(width: MainQuestHUD.width)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.leading, 16)
+        .padding(.top, 16)
+        .allowsHitTesting(false)
+    }
+
+    private var mainQuestHUDItem: MainQuestHUDItem {
+        if game.narrativeCampaign.isActive {
+            let moment = game.narrativeCampaign.currentMoment
+            return MainQuestHUDItem(
+                quest: game.narrativeCampaign.chapter.title,
+                currentGoal: moment.goal,
+                hint: game.narrativeCampaign.progressText,
+                isUrgent: moment.id.hasPrefix("4.") || moment.id.hasPrefix("5.rumor")
+            )
+        }
+        return MainQuestHUDItem(
+            quest: game.activeChapter.rawValue,
+            currentGoal: game.chapterCurrentObjective,
+            hint: game.chapterProgressText,
+            isUrgent: game.chapterOneStep == .inspectNote || game.chapterOneStep == .followLinChe
+        )
+    }
+
+    private var fullNarrativeGameplayHUD: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ChapterClueStackView(clues: game.chapterClues)
+                }
+                Spacer()
+                narrativeKeyboardFocusChip
+                audioCueStrip
+                Button { game.openNarrativePauseMenu() } label: {
+                    Image(systemName: "pause.fill")
+                        .frame(width: 34, height: 30)
+                }
+                .buttonStyle(SegmentButtonStyle(isSelected: false))
+                .help("暂停")
+            }
+            Spacer(minLength: 20)
+            messagePanel
+            actionBar
+        }
+        .padding(18)
+    }
+
+    private var narrativeKeyboardFocusChip: some View {
+        Group {
+            if game.accessibilityPreferences.keyboardAlternativeInput,
+               let target = game.focusedNarrativeKeyboardTarget {
+                Label(target.title, systemImage: target.symbol)
+                    .font(.system(size: 11, weight: .bold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .liquidGlassPanel(tint: target.requiresMovement ? .mint.opacity(0.08) : .cyan.opacity(0.08))
+                    .help("Tab 切换目标，Enter/空格确认")
+            }
+        }
+    }
+
+    private var narrativeMinimalHUDOverlay: some View {
+        VStack {
+            HStack {
+                Spacer()
+                NarrativeMinimalHUDControls(
+                    captionsEnabled: game.accessibilityPreferences.directionalSubtitles,
+                    onToggleCaptions: {
+                        game.updateAccessibilityPreferences { $0.directionalSubtitles.toggle() }
+                    },
+                    onPause: {
+                        game.openNarrativePauseMenu()
+                    }
+                )
+            }
+            Spacer()
+        }
+        .padding(18)
+    }
+
+    private var developerPanel: some View {
+        VStack {
+            HStack {
+                Spacer()
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("状态机控制台", systemImage: "wrench.and.screwdriver.fill")
+                            .font(.system(size: 14, weight: .bold))
+                        Spacer()
+                        Button { game.isDeveloperPanelPresented = false } label: {
+                            Image(systemName: "xmark").frame(width: 26, height: 24)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: false))
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(game.developerPlaytestStatus)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(game.developerPlaytestStatus.contains("通过") ? .mint : .white)
+                        Text(game.developerStateSummary)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(2)
+                    }
+
+                    HStack(spacing: 7) {
+                        ForEach(NarrativeChapter.allCases) { chapter in
+                            Button { game.developerJump(to: chapter) } label: {
+                                Text("\(chapter.rawValue)")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .frame(width: 27, height: 25)
+                            }
+                            .buttonStyle(SegmentButtonStyle(isSelected: game.narrativeCampaign.isActive && game.narrativeCampaign.chapter == chapter))
+                            .help(chapter.title)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Button { game.startDeveloperAutoplay() } label: {
+                            Label("全流程", systemImage: "play.fill")
+                                .frame(maxWidth: .infinity, minHeight: 30)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: game.developerPlaytestStatus == "运行中"))
+                        Button { game.developerAdvanceOneStep() } label: {
+                            Image(systemName: "forward.frame.fill")
+                                .frame(width: 34, height: 30)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: false))
+                        .help("提交一次真实状态机输入")
+                        Button { game.stopDeveloperAutoplay() } label: {
+                            Image(systemName: "stop.fill")
+                                .frame(width: 34, height: 30)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: false))
+                        .help("停止自动游玩")
+                    }
+
+                    Divider().overlay(.white.opacity(0.18))
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(Array(game.developerPlaytestLog.suffix(6).enumerated()), id: \.offset) { _, entry in
+                            Text(entry)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 66, alignment: .topLeading)
+
+                    Divider().overlay(.white.opacity(0.18))
+                    PlaytestRouteTranscriptView(entries: Array(game.playtestRouteTranscript.suffix(4)))
+
+                    Divider().overlay(.white.opacity(0.18))
+                    NarrativeIntegrationMatrixView(results: NarrativeIntegrationMatrix.results, compact: true)
+
+                    Divider().overlay(.white.opacity(0.18))
+                    AutonomousRouteAuditView(results: AutonomousRouteAuditor.runAll(), compact: true)
+                }
+                .padding(14)
+                .frame(width: 380)
+                .liquidGlassPanel(tint: .black.opacity(0.34))
+            }
+            Spacer()
+        }
+        .padding(18)
     }
 
     private var menuOverlay: some View {
         VStack(spacing: 18) {
             VStack(spacing: 8) {
-                Text("晚自习模拟器")
+                Text("这里有光")
                     .font(.system(size: 34, weight: .bold))
                 Text("3D 第一视角心理健康体验")
                     .font(.system(size: 14, weight: .semibold))
@@ -52,36 +353,349 @@ struct ContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("开局角色与制度参数")
+                Text(game.prologueState.prologueCompleted ? "从哪里开始" : "序章 · 铃响之前")
                     .font(.system(size: 13, weight: .bold))
-                settingsPanel
+                Text(game.prologueState.prologueCompleted
+                     ? "你已经熟悉基本操作，可以重新走进铃响前的教室，也可以直接开始第一章。"
+                     : "先走进教学楼，认识视角、移动、互动和自我照顾。这里没有失败，也没有需要背下来的正确答案。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
             .liquidGlassPanel()
 
-            Button {
-                game.startGame()
-            } label: {
-                Label("开始晚自习", systemImage: "play.fill")
+            if game.hasContinuableNarrativeSave {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "tray.and.arrow.down.fill")
+                            .foregroundStyle(.mint)
+                        Text(game.narrativeSaveTitle)
+                            .font(.system(size: 13, weight: .bold))
+                        Spacer()
+                        Text("稳定检查点")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.mint.opacity(0.86))
+                    }
+                    Text(game.narrativeSaveDetail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button { game.continueNarrativeSaveFromMenu() } label: {
+                        Label("继续旅程", systemImage: "play.fill")
+                            .frame(width: 180, height: 38)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                }
+                .padding(12)
+                .frame(width: 340, alignment: .leading)
+                .liquidGlassPanel(tint: .mint.opacity(0.08))
+            }
+
+            if game.prologueState.prologueCompleted {
+                HStack(spacing: 12) {
+                    Button { game.startExperience(forcePrologue: true) } label: {
+                        Label("进入序章", systemImage: "building.2.fill")
+                            .frame(width: 150, height: 38)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    Button { game.startGame() } label: {
+                        Label("直接第一章", systemImage: "book.fill")
+                            .frame(width: 150, height: 38)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                }
+            } else {
+                Button {
+                    game.startExperience()
+                } label: {
+                    Label("走进教学楼", systemImage: "door.left.hand.open")
+                        .frame(width: 180, height: 38)
+                }
+                .buttonStyle(ActionButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+
+            Button { game.startFullNarrativeCampaign() } label: {
+                Label("完整六章叙事", systemImage: "sparkles.rectangle.stack")
                     .frame(width: 180, height: 38)
             }
             .buttonStyle(ActionButtonStyle())
-            .keyboardShortcut(.defaultAction)
+            .help("从静音的教室一路走到咨询室，含镜像三灯互动、同伴选择与安全交接")
+
+            Button { game.startAutonomousPlay() } label: {
+                Label("自主游玩", systemImage: "play.circle.fill")
+                    .frame(width: 180, height: 38)
+            }
+            .buttonStyle(ActionButtonStyle())
+            .help(game.autonomousPlaySummary)
         }
         .padding(26)
         .liquidGlassPanel()
     }
 
+    private var prologueHUD: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack {
+                HStack {
+                    prologueQuestPanel
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Button {
+                            game.updateAccessibilityPreferences { $0.directionalSubtitles.toggle() }
+                        } label: {
+                            Image(systemName: game.accessibilityPreferences.directionalSubtitles ? "captions.bubble.fill" : "captions.bubble")
+                                .frame(width: 30, height: 28)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: game.accessibilityPreferences.directionalSubtitles))
+                        .help("方向字幕")
+                        Button { game.setProloguePaused(true) } label: {
+                            Image(systemName: "pause.fill")
+                                .frame(width: 30, height: 28)
+                        }
+                        .buttonStyle(SegmentButtonStyle(isSelected: false))
+                        .help("暂停")
+                    }
+                    .liquidGlassPanel()
+                }
+                Spacer()
+                if let subtitle = game.directionalSubtitleEvents.first,
+                   subtitle.createdAt.timeIntervalSinceNow > -5 {
+                    Text(subtitle.caption)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.48))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                Text(game.message)
+                    .font(.custom("STXingkai", size: 20))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.94))
+                    .frame(maxWidth: 760)
+                    .padding(14)
+                    .background(.black.opacity(0.48))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+
+                prologueControls
+            }
+            .padding(18)
+
+            if game.prologueCurrentBeat == .accessibility {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        PrologueAccessibilityHintView(
+                            onOpenSettings: { game.acknowledgeAccessibilityTutorial(openSettings: true) },
+                            onContinue: { game.acknowledgeAccessibilityTutorial(openSettings: false) }
+                        )
+                        .padding(.trailing, 18)
+                        .padding(.bottom, 18)
+                    }
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .animation(.easeInOut(duration: game.accessibilityPreferences.reduceMotion ? 0.2 : 0.3), value: game.prologueCurrentBeat)
+            }
+        }
+    }
+
+    private var prologueQuestPanel: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(game.prologueCurrentBeat.mainTask)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+            Text(game.prologueCurrentBeat.currentGoal)
+                .font(.system(size: 15, weight: .semibold))
+                .id(game.prologueCurrentBeat)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            if let hint = game.prologueCurrentBeat.hint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            if let echo = game.prologueState.lastBeatEcho {
+                PrologueBeatEchoView(echo: echo)
+                .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(width: 235, alignment: .leading)
+        .liquidGlassPanel(cornerRadius: 8)
+        .animation(.easeInOut(duration: 0.3), value: game.prologueCurrentBeat)
+    }
+
+    @ViewBuilder
+    private var prologueControls: some View {
+        switch game.prologueCurrentBeat {
+        case .settleBreath:
+            HStack(spacing: 10) {
+                Button { game.execute(.breathe) } label: {
+                    Label("深呼吸", systemImage: "wind").frame(width: 120, height: 36)
+                }
+                .buttonStyle(ActionButtonStyle())
+                Button { game.completePrologueBeat(.settleBreath, source: .fallback) } label: {
+                    Text("先坐一会儿").frame(width: 120, height: 36)
+                }
+                .buttonStyle(ActionButtonStyle())
+            }
+            .padding(.top, 8)
+        case .placeWater:
+            Text("空格 · 确认")
+                .font(.system(size: 12, weight: .bold))
+                .padding(.horizontal, 13)
+                .frame(height: 32)
+                .liquidGlassPanel()
+        default:
+            EmptyView()
+        }
+    }
+
+    private var prologuePauseOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.56).ignoresSafeArea()
+            VStack(spacing: 14) {
+                Text("已暂停").font(.system(size: 22, weight: .bold))
+                Button("继续") { game.setProloguePaused(false) }
+                    .buttonStyle(ActionButtonStyle())
+                Button("辅助设置") {
+                    game.openAccessibilityPanel()
+                }
+                .buttonStyle(ActionButtonStyle())
+                Button("返回菜单") { game.returnToMenuForNewGame() }
+                    .buttonStyle(ActionButtonStyle())
+            }
+            .padding(28)
+            .liquidGlassPanel(cornerRadius: 8)
+        }
+    }
+
+    private var narrativePauseOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.58).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    Image(systemName: "pause.circle.fill")
+                        .foregroundStyle(.mint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("旅程已暂停")
+                            .font(.system(size: 22, weight: .bold))
+                        Text(game.narrativeSaveTitle)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.68))
+                    }
+                    Spacer()
+                }
+
+                Text(game.narrativeSaveDetail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().overlay(.white.opacity(0.18))
+
+                HStack(spacing: 10) {
+                    Button { game.resumeNarrativeFromPause() } label: {
+                        Label("继续", systemImage: "play.fill")
+                            .frame(width: 120, height: 34)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+
+                    Button { game.openAccessibilityPanel() } label: {
+                        Label("辅助设置", systemImage: "accessibility")
+                            .frame(width: 136, height: 34)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+
+                    Button { game.pauseNarrativeToMenu() } label: {
+                        Label("回主菜单", systemImage: "rectangle.portrait.and.arrow.right")
+                            .frame(width: 136, height: 34)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                }
+            }
+            .padding(24)
+            .frame(width: 470, alignment: .leading)
+            .liquidGlassPanel(cornerRadius: 8)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("旅程已暂停")
+    }
+
+    private var accessibilityPanel: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("辅助与体验设置").font(.system(size: 18, weight: .bold))
+                    Spacer()
+                    Button { game.closeAccessibilityPanel() } label: {
+                        Image(systemName: "xmark").frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(SegmentButtonStyle(isSelected: false))
+                }
+                Toggle("方向字幕", isOn: accessibilityBinding(\.directionalSubtitles))
+                prologueVolumeSlider("对白", value: accessibilityBinding(\.dialogueVolume))
+                prologueVolumeSlider("环境", value: accessibilityBinding(\.ambienceVolume))
+                prologueVolumeSlider("提示音", value: accessibilityBinding(\.cueVolume))
+                Toggle("减少动态效果", isOn: accessibilityBinding(\.reduceMotion))
+                Toggle("键盘替代输入", isOn: accessibilityBinding(\.keyboardAlternativeInput))
+                Text("这些设置会立即保留到后续章节。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            .toggleStyle(.switch)
+            .padding(22)
+            .frame(width: 430)
+            .liquidGlassPanel(cornerRadius: 8)
+        }
+    }
+
+    private func prologueVolumeSlider(_ title: String, value: Binding<Double>) -> some View {
+        HStack {
+            Text(title).frame(width: 48, alignment: .leading)
+            Slider(value: value, in: 0...1)
+            Text("\(Int(value.wrappedValue * 100))%")
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 40, alignment: .trailing)
+        }
+    }
+
+    private func accessibilityBinding<Value>(_ keyPath: WritableKeyPath<AccessibilityPreferences, Value>) -> Binding<Value> {
+        Binding(
+            get: { game.accessibilityPreferences[keyPath: keyPath] },
+            set: { newValue in
+                game.updateAccessibilityPreferences { preferences in
+                    preferences[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
     private var topHUD: some View {
         HStack(alignment: .top, spacing: 14) {
-            fixedParameterPanel
+            compactChapterIdentity
 
             Spacer()
-
-            roleStatusPanel
-
-            dynamicVariablePanel
         }
+    }
+
+    private var compactChapterIdentity: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("苏念 · 心理委员")
+                .font(.system(size: 13, weight: .bold))
+            Text("\(game.clockText) · \(game.currentPeriod.displayName)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.65))
+        }
+        .padding(10)
+        .frame(width: 180, alignment: .leading)
+        .liquidGlassPanel()
     }
 
     private var fixedParameterPanel: some View {
@@ -431,6 +1045,32 @@ struct ContentView: View {
                 }
                 .frame(width: 330)
             }
+
+            if game.isTeacherTruthRunActive {
+                TeacherTruthRoutePanel(
+                    summary: game.teacherTruthRunSummary,
+                    objectives: game.teacherTruthObjectives
+                )
+            }
+
+            HStack(spacing: 6) {
+                ForEach(TeacherAction.allCases) { action in
+                    Button {
+                        game.executeTeacherAction(action)
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: action.icon)
+                                .font(.system(size: 12, weight: .bold))
+                            Text(action.rawValue)
+                                .font(.system(size: 8.5, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .frame(width: 66, height: 38)
+                    }
+                    .buttonStyle(SegmentButtonStyle(isSelected: game.currentTeacherTruthObjective?.action == action))
+                    .help("教师行动 \(String(action.shortcut))：\(action.rawValue)")
+                }
+            }
         }
         .padding(10)
         .frame(width: 620, alignment: .topLeading)
@@ -446,7 +1086,7 @@ struct ContentView: View {
                     Text("\(mate.profile.traitLabel) · \(mate.state.rawValue) · \(mate.hasSharedTruth || mate.suspicionOfPlayer > 0 ? "有记忆" : "新关系")")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle((mate.hasSharedTruth || mate.suspicionOfPlayer > 0) ? .mint.opacity(0.86) : .white.opacity(0.54))
-                    Text("关系 \(Int(mate.relationship)) · 怀疑 \(Int(mate.suspicionOfPlayer))")
+                    Text(relationshipTone(for: mate))
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.72))
                     Text(relationshipMemoryLine(for: mate))
@@ -460,6 +1100,14 @@ struct ContentView: View {
                 .liquidGlassPanel(tint: classmateColor(mate.state).opacity(0.18))
             }
         }
+    }
+
+    private func relationshipTone(for mate: Classmate) -> String {
+        if mate.suspicionOfPlayer > 38 { return "对你的小动作很敏感" }
+        if mate.relationship > 62 { return "愿意靠近一点" }
+        if mate.relationship < 24 { return "保持距离" }
+        if mate.hasSharedTruth { return "记得一次真实交流" }
+        return "关系停在普通同学"
     }
 
     private func relationshipMemoryLine(for mate: Classmate) -> String {
@@ -507,25 +1155,26 @@ struct ContentView: View {
                 soundRadar
                     .frame(width: 46, height: 46)
             }
-            ForEach(game.audioCues.prefix(3)) { cue in
-                HStack(spacing: 6) {
-                    Image(systemName: icon(for: cue.kind))
-                        .font(.system(size: 10, weight: .bold))
-                        .frame(width: 14)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("\(cue.kind.rawValue) · \(cue.direction)")
-                            .font(.system(size: 10, weight: .semibold))
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(.white.opacity(0.13))
-                                Capsule().fill(.cyan.opacity(0.78)).frame(width: geo.size.width * cue.intensity)
-                            }
-                        }
-                        .frame(height: 4)
-                    }
-                }
-                .help(cue.note)
+            SensorySoundscapeView(soundscape: currentSoundscape, compact: true)
+            if let latestCue = game.audioCues.first {
+                AudioCueReadoutView(cue: latestCue, compact: true)
             }
+            if let feedback = game.seatedPosePressureFeedback {
+                SeatedPosePressureView(feedback: feedback, compact: true)
+            }
+            if let readout = game.teacherPatrolReadout {
+                TeacherPatrolReadoutView(readout: readout, compact: true)
+            }
+            if let currentSpatialObjective {
+                SpatialAudioObjectiveView(objective: currentSpatialObjective, compact: true)
+            }
+            if let currentPeerCue {
+                SensoryPeerCueView(cue: currentPeerCue, compact: true)
+            }
+            DirectionalSubtitleStripView(
+                events: Array(game.directionalSubtitleEvents.prefix(3)),
+                captionsEnabled: game.accessibilityPreferences.directionalSubtitles
+            )
         }
         .padding(8)
         .frame(width: 180, alignment: .leading)
@@ -564,6 +1213,11 @@ struct ContentView: View {
                     .keyboardShortcut(.cancelAction)
                 }
 
+                SensorySoundscapeView(soundscape: currentSoundscape, compact: false)
+                if let currentPeerCue {
+                    SensoryPeerCueView(cue: currentPeerCue, compact: false)
+                }
+
                 HStack(alignment: .top, spacing: 14) {
                     VStack(spacing: 8) {
                         soundRadar
@@ -583,20 +1237,20 @@ struct ContentView: View {
                         perceptionRow(
                             icon: "eye.fill",
                             title: "\(game.cameraPose.rawValue) · \(game.cameraPose.visionZone.displayName)",
-                            detail: "视觉注意力 \(Int(game.player.visualAttention))，姿态 \(game.player.posture.rawValue)。",
+                            detail: "视线\(visualStabilityText)，姿态 \(game.player.posture.rawValue)。",
                             advice: visualAdvice,
                             tint: .mint
                         )
                         perceptionRow(
                             icon: game.teacher.isNearPlayer ? "person.crop.circle.badge.exclamationmark.fill" : "person.crop.circle.fill",
                             title: game.teacher.isNearPlayer ? "老师在近处" : "老师在远处或不确定位置",
-                            detail: "教师 KPI \(Int(game.teacher.kpiPressure))，疲惫 \(Int(game.teacher.fatigue))，制度压力 \(Int(game.teacher.institutionalPressure))。",
+                            detail: teacherStateText,
                             advice: teacherDistanceAdvice,
                             tint: game.teacher.isNearPlayer ? .orange : .cyan
                         )
                         perceptionRow(
                             icon: "rectangle.lefthalf.inset.filled",
-                            title: "余光强度 左 \(Int(game.peripheralLeft * 100)) · 右 \(Int(game.peripheralRight * 100))",
+                            title: "余光变化",
                             detail: "余光越高，越可能代表同桌、过道、老师或后门的不确定信号。",
                             advice: peripheralAdvice,
                             tint: .purple
@@ -617,13 +1271,7 @@ struct ContentView: View {
                         )
                     } else {
                         ForEach(game.audioCues.prefix(5)) { cue in
-                            perceptionRow(
-                                icon: icon(for: cue.kind),
-                                title: "\(cue.kind.rawValue) · \(cue.direction) · 强度 \(Int(cue.intensity * 100))",
-                                detail: cue.note,
-                                advice: audioAdvice(for: cue),
-                                tint: color(for: cue.kind)
-                            )
+                            AudioCueReadoutView(cue: cue, compact: false)
                         }
                     }
                 }
@@ -661,32 +1309,7 @@ struct ContentView: View {
     }
 
     private var soundRadar: some View {
-        Canvas { context, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let radius = min(size.width, size.height) / 2 - 3
-            var grid = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-            grid.move(to: CGPoint(x: center.x, y: center.y - radius))
-            grid.addLine(to: CGPoint(x: center.x, y: center.y + radius))
-            grid.move(to: CGPoint(x: center.x - radius, y: center.y))
-            grid.addLine(to: CGPoint(x: center.x + radius, y: center.y))
-            context.stroke(grid, with: .color(.white.opacity(0.18)), lineWidth: 1)
-
-            let listener = Path(ellipseIn: CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5))
-            context.fill(listener, with: .color(.white.opacity(0.7)))
-
-            for cue in game.audioCues.prefix(5) {
-                let angle = audioAngle(for: cue.direction)
-                let distance = radius * (0.22 + 0.7 * min(1, cue.intensity))
-                let point = CGPoint(
-                    x: center.x + cos(angle) * distance,
-                    y: center.y + sin(angle) * distance
-                )
-                let dotRadius = 2.5 + cue.intensity * 4.5
-                let dot = Path(ellipseIn: CGRect(x: point.x - dotRadius, y: point.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
-                context.fill(dot, with: .color(color(for: cue.kind).opacity(0.48 + cue.intensity * 0.42)))
-            }
-        }
-        .accessibilityLabel("声音方向雷达")
+        SoundRadarView(cues: Array(game.audioCues.prefix(5)))
     }
 
     private var visualAdvice: String {
@@ -741,6 +1364,8 @@ struct ContentView: View {
             return "心跳声变大说明身体进入报警。先呼吸或降低输入，不要连续做高消耗判断。"
         case .broadcast:
             return "广播会提高全班制度压力。坐直能降暴露，但也会增加面具成本。"
+        case .bell:
+            return "铃声只标记时间变化，不代表每个人都已经准备好了。"
         case .knock:
             return "后门声音会制造不确定性。确认信息有代价，回头前先看当前暴露值。"
         case .stomach:
@@ -790,28 +1415,40 @@ struct ContentView: View {
         }
     }
 
-    private func audioAngle(for direction: String) -> Double {
-        if direction.contains("颅内") { return -.pi / 2 }
-        if direction.contains("头顶") { return -.pi / 2 }
-        if direction.contains("后") { return .pi / 2 }
-        if direction.contains("左") { return .pi }
-        if direction.contains("右") { return 0 }
-        if direction.contains("桌面") || direction.contains("桌边") || direction.contains("座位") { return -.pi / 5 }
-        if direction.contains("讲台") || direction.contains("前") { return -.pi / 2 }
-        if direction.contains("过道") { return -.pi / 8 }
-        return -.pi / 2
-    }
-
     private func color(for kind: AudioCueKind) -> Color {
         switch kind {
         case .footstep, .knock: return .orange
         case .phone, .broadcast: return .blue
+        case .bell: return .teal
         case .paper, .wrapper, .chair: return .yellow
         case .whisper, .crying: return .cyan
         case .lights: return .mint
         case .heartbeat, .stomach: return .red
         case .teacherCough, .teacherSigh: return .purple
         }
+    }
+
+    private var visualStabilityText: String {
+        if game.player.visualAttention < 22 { return "开始发散" }
+        if game.player.visualAttention < 48 { return "不太稳" }
+        if game.player.stress > 76 { return "被压力拉紧" }
+        return "还算稳定"
+    }
+
+    private var teacherStateText: String {
+        if game.teacher.institutionalPressure > 70 || game.teacher.fatigue > 76 {
+            return "老师的停顿和叹气变多，管理压力明显压在她身上。"
+        }
+        if game.teacher.isNearPlayer {
+            return "脚步停得很近，你更容易先感觉到风险，而不是看清原因。"
+        }
+        return "老师仍在维持全班秩序，但你无法确定她正在看谁。"
+    }
+
+    private func cueIntensityText(_ value: Double) -> String {
+        if value > 0.76 { return "很清楚" }
+        if value > 0.42 { return "能分辨" }
+        return "很轻"
     }
 
     private func icon(for kind: AudioCueKind) -> String {
@@ -825,6 +1462,7 @@ struct ContentView: View {
         case .lights: return "lightbulb.fill"
         case .heartbeat: return "heart.fill"
         case .broadcast: return "speaker.wave.2.fill"
+        case .bell: return "bell.fill"
         case .knock: return "door.left.hand.closed"
         case .stomach: return "figure.core.training"
         case .wrapper: return "takeoutbag.and.cup.and.straw.fill"
@@ -839,73 +1477,125 @@ struct ContentView: View {
                 studentControlHint
             }
 
-            HStack(spacing: 10) {
-                if game.activeRole.isTeacher {
-                    ForEach(TeacherAction.allCases) { action in
-                        Button {
-                            game.executeTeacherAction(action)
-                        } label: {
-                            actionLabel(icon: action.icon, text: action.rawValue)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if game.activeRole.isTeacher {
+                        ForEach(TeacherAction.allCases) { action in
+                            Button {
+                                game.executeTeacherAction(action)
+                            } label: {
+                                actionLabel(icon: action.icon, text: action.rawValue)
+                            }
+                            .buttonStyle(ActionButtonStyle())
+                            .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
+                            .help("\(action.rawValue) · \(String(action.shortcut))")
                         }
-                        .buttonStyle(ActionButtonStyle())
-                        .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
-                        .help("\(action.rawValue) · \(String(action.shortcut))")
-                    }
-                } else if game.freeRoam.isActive {
-                    Text("自由活动中：拖动鼠标调整方向，空格前进，Shift 侧身；回座后继续晚自习。")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .frame(height: 58)
-                } else {
-                    ForEach(PlayerAction.allCases) { action in
-                        Button {
-                            game.execute(action)
-                        } label: {
-                            actionLabel(icon: action.icon, text: action.rawValue)
+                    } else if game.freeRoam.isActive {
+                        Text("自由活动中：WASD 行走，Shift 侧身，Control 疾跑；按 ~ 可释放或捕获鼠标。")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .frame(height: 44)
+                    } else {
+                        ForEach(chapterOneActions) { action in
+                            Button {
+                                game.execute(action)
+                            } label: {
+                                actionLabel(icon: action.icon, text: action.rawValue)
+                            }
+                            .buttonStyle(ActionButtonStyle())
+                            .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
+                            .help("\(action.rawValue) · \(String(action.shortcut))")
                         }
-                        .buttonStyle(ActionButtonStyle())
-                        .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
-                        .help("\(action.rawValue) · \(String(action.shortcut))")
                     }
                 }
+                .padding(.horizontal, 2)
             }
+            .frame(maxWidth: .infinity, minHeight: 52)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
         .liquidGlassPanel()
+    }
+
+    private var chapterOneActions: [PlayerAction] {
+        game.chapterOneAvailableActions
+    }
+
+    private func featuredMonologueLayer(_ monologue: FeaturedMonologue) -> some View {
+        FeaturedMonologueView(monologue: monologue) {
+            game.dismissFeaturedMonologue()
+        }
     }
 
     private var studentControlHint: some View {
         HStack(spacing: 10) {
-            Label("按住画面拖动视角", systemImage: "cursorarrow.motionlines")
+            Label(game.mouseLookCaptured ? "移动鼠标自由环视" : "鼠标已释放", systemImage: "cursorarrow.motionlines")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.cyan.opacity(0.88))
+            Label(game.mouseLookCaptured ? "` / ~ 释放鼠标" : "` / ~ 捕获视角", systemImage: "keyboard.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.72))
             Text("\(game.cameraPose.rawValue) · \(game.cameraPose.visionZone.displayName)")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.62))
+
+            Button {
+                game.setMouseLookEnabled(!game.mouseLookEnabled)
+            } label: {
+                Label(game.mouseLookEnabled ? "释放视角" : "捕获视角", systemImage: game.mouseLookEnabled ? "cursorarrow.slash" : "cursorarrow.motionlines")
+                    .frame(minWidth: 74, minHeight: 26)
+            }
+            .buttonStyle(SegmentButtonStyle(isSelected: game.mouseLookEnabled))
+            .help(game.mouseLookEnabled ? "释放鼠标视角，允许操作界面；也可按键盘左上角 ` / ~" : "捕获鼠标视角；也可按键盘左上角 ` / ~")
+
+            Button {
+                game.recenterStudentView()
+            } label: {
+                Label("回到前方", systemImage: "arrow.uturn.backward.circle")
+                    .frame(minWidth: 74, minHeight: 26)
+            }
+            .buttonStyle(SegmentButtonStyle(isSelected: game.cameraPose == .forward))
+            .help("把学生视角回到前方")
+
+            Button {
+                game.toggleAutonomousPlay()
+            } label: {
+                Label(game.isAutonomousPlayEnabled ? "接管" : "自主游玩", systemImage: game.isAutonomousPlayEnabled ? "stop.fill" : "play.fill")
+                    .frame(minWidth: 76, minHeight: 26)
+            }
+            .buttonStyle(SegmentButtonStyle(isSelected: game.isAutonomousPlayEnabled))
+            .help(game.autonomousPlaySummary)
+
+            if game.isAutonomousPlayEnabled {
+                Text("第 \(game.autonomousPlayStepCount) 步")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.mint.opacity(0.9))
+                    .help(game.autonomousPlayLastDecision)
+            }
 
             if game.freeRoam.isActive {
                 Divider()
                     .frame(height: 20)
                     .overlay(.white.opacity(0.22))
-                Label("空格前进", systemImage: "keyboard.fill")
+                Label("WASD移动", systemImage: "keyboard.fill")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.mint.opacity(0.9))
                 Label(game.freeRoam.isSideways ? "侧身中" : "Shift侧身", systemImage: "rectangle.compress.vertical")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(game.freeRoam.isSideways ? .orange.opacity(0.92) : .white.opacity(0.62))
+                Label(game.freeRoam.isSprinting ? "疾跑中" : "Control疾跑", systemImage: "figure.run")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(game.freeRoam.isSprinting ? .yellow.opacity(0.94) : .white.opacity(0.62))
                 Text("\(game.freeRoam.remainingSeconds)s")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundStyle(.orange.opacity(0.92))
                 if let door = game.nearbyStudentDoor {
                     let isOpen = game.isStudentDoorOpen(door)
-                    Button {
-                        game.toggleNearbyStudentDoor()
-                    } label: {
-                        Label(isOpen ? "关\(door.rawValue)" : "开\(door.rawValue)", systemImage: isOpen ? "door.left.hand.open" : "door.left.hand.closed")
-                            .frame(width: 86, height: 28)
-                    }
-                    .buttonStyle(ActionButtonStyle())
-                    .help(isOpen ? "关闭\(door.rawValue)" : "打开\(door.rawValue)")
+                    Label("E · \(isOpen ? "关" : "开")\(door.rawValue)", systemImage: isOpen ? "door.left.hand.open" : "door.left.hand.closed")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.cyan.opacity(0.94))
+                        .frame(minWidth: 88, minHeight: 28)
                 }
                 if game.isNearPlayerLocker {
                     Button {
@@ -921,21 +1611,21 @@ struct ContentView: View {
                     Button {
                         game.refillWaterCup()
                     } label: {
-                        Label("接水", systemImage: "drop.fill")
-                            .frame(width: 76, height: 28)
+                        Label("接水10s", systemImage: "drop.fill")
+                            .frame(width: 86, height: 28)
                     }
                     .buttonStyle(ActionButtonStyle())
-                    .help("把水杯补满到 100")
+                    .help("消耗 10 秒，把水杯补满到 100")
                 }
                 if game.isNearRestroom {
                     Button {
                         game.useRestroom()
                     } label: {
-                        Label("如厕", systemImage: "figure.stand")
-                            .frame(width: 76, height: 28)
+                        Label("如厕10s", systemImage: "figure.stand")
+                            .frame(width: 86, height: 28)
                     }
                     .buttonStyle(ActionButtonStyle())
-                    .help("消耗 10 秒，如厕需求归零")
+                    .help("进入厕所并靠近马桶后，消耗 10 秒，如厕需求归零")
                 }
                 Button {
                     game.returnToSeatFromFreeRoam()
@@ -945,6 +1635,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(ActionButtonStyle())
                 .keyboardShortcut(.return, modifiers: [])
+                .disabled(game.isReturningToSeat)
             }
         }
         .padding(.horizontal, 10)
@@ -955,11 +1646,11 @@ struct ContentView: View {
     private func actionLabel(icon: String, text: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
             Text(text)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
         }
-        .frame(width: 82, height: 58)
+        .frame(width: 74, height: 44)
     }
 
     private var peripheralIndicators: some View {
@@ -992,6 +1683,97 @@ struct ContentView: View {
             .allowsHitTesting(false)
     }
 
+    private var returnToSeatTransitionLayer: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: game.isReturningToSeat == false)) { timeline in
+            GeometryReader { proxy in
+                let progress = returnToSeatProgress(at: timeline.date)
+                let motion = smoothStep(from: 0.04, to: 0.25, value: progress) * (1 - smoothStep(from: 0.48, to: 0.66, value: progress))
+                let closing = smoothStep(from: 0.24, to: 0.6, value: progress)
+                let reopening = smoothStep(from: 0.69, to: 1, value: progress)
+                let eyelidClosure = max(0, closing - reopening)
+                let blackout = smoothStep(from: 0.3, to: 0.61, value: progress) * (1 - smoothStep(from: 0.72, to: 1, value: progress))
+                let revealGlow = smoothStep(from: 0.7, to: 0.84, value: progress) * (1 - smoothStep(from: 0.88, to: 1, value: progress))
+
+                ZStack {
+                    Color.black
+                        .opacity(game.isReturningToSeat ? 0.18 + blackout * 0.7 : 0)
+
+                    ForEach(0..<14, id: \.self) { index in
+                        let lane = Double(index) / 13
+                        let travel = (progress * 2.4 + lane).truncatingRemainder(dividingBy: 1)
+                        Capsule()
+                            .fill(index.isMultiple(of: 3) ? Color.cyan.opacity(0.42) : (index.isMultiple(of: 2) ? Color.orange.opacity(0.34) : Color.white.opacity(0.3)))
+                            .frame(width: 48 + CGFloat(index % 5) * 18, height: index.isMultiple(of: 4) ? 2.2 : 1.2)
+                            .rotationEffect(.degrees(index.isMultiple(of: 2) ? -8 : 7))
+                            .position(
+                                x: proxy.size.width * (0.08 + 0.84 * lane),
+                                y: proxy.size.height * (0.12 + 0.76 * travel)
+                            )
+                            .blur(radius: index.isMultiple(of: 3) ? 1.4 : 0.5)
+                            .opacity(motion * (0.28 + Double(index % 4) * 0.08))
+                    }
+
+                    Rectangle()
+                        .fill(.white.opacity(revealGlow * 0.16))
+
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(.black)
+                            .frame(height: proxy.size.height * 0.5 * eyelidClosure + 1)
+                        Spacer(minLength: 0)
+                        Rectangle()
+                            .fill(.black)
+                            .frame(height: proxy.size.height * 0.5 * eyelidClosure + 1)
+                    }
+
+                    Rectangle()
+                        .fill(.white.opacity(0.28 * eyelidClosure * (1 - blackout)))
+                        .frame(height: 1)
+                        .blur(radius: 1.5)
+
+                    VStack(spacing: 10) {
+                        HStack(spacing: 9) {
+                            Rectangle()
+                                .fill(.white.opacity(0.42))
+                                .frame(width: 34, height: 1)
+                            Image(systemName: progress < 0.62 ? "figure.walk.motion" : "chair.fill")
+                                .font(.system(size: 19, weight: .semibold))
+                            Rectangle()
+                                .fill(.white.opacity(0.42))
+                                .frame(width: 34, height: 1)
+                        }
+                        Text(returnToSeatPhaseText(progress: progress))
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(.white.opacity(0.86))
+                    .offset(y: CGFloat(sin(progress * .pi * 8)) * 2.5)
+                    .opacity(game.isReturningToSeat ? min(1, motion + blackout * 0.72) * (1 - reopening) : 0)
+                }
+                .allowsHitTesting(game.isReturningToSeat)
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func returnToSeatProgress(at date: Date) -> Double {
+        guard game.isReturningToSeat else { return 0 }
+        return (date.timeIntervalSince(game.returnToSeatStartedAt) / GameManager.returnToSeatTotalDuration).clamped(to: 0...1)
+    }
+
+    private func returnToSeatPhaseText(progress: Double) -> String {
+        if progress < 0.28 {
+            return "转身，沿原路折返"
+        } else if progress < 0.62 {
+            return "脚步重新进入教室"
+        }
+        return "坐回桌前，呼吸慢下来"
+    }
+
+    private func smoothStep(from start: Double, to end: Double, value: Double) -> Double {
+        let amount = ((value - start) / (end - start)).clamped(to: 0...1)
+        return amount * amount * (3 - 2 * amount)
+    }
+
     private var eventCinematicLayer: some View {
         GeometryReader { proxy in
             if case .event(let event) = game.gameState {
@@ -1019,6 +1801,388 @@ struct ContentView: View {
         }
     }
 
+    private var scenePresentationLayer: some View {
+        GeometryReader { proxy in
+            if game.scenePresentation.isActive {
+                let presentation = game.scenePresentation
+                let bottomInset = max(CGFloat(44), proxy.size.height * 0.10)
+
+                if game.accessibilityPreferences.reduceMotion {
+                    scenePresentationLayerContent(
+                        presentation: presentation,
+                        presence: 1,
+                        phaseProgress: 0,
+                        size: proxy.size,
+                        bottomInset: bottomInset
+                    )
+                    .ignoresSafeArea()
+                    .allowsHitTesting(true)
+                } else {
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: false)) { timeline in
+                        let phaseProgress = presentation.phaseProgress(at: timeline.date)
+                        let presence = scenePresentationPresence(for: presentation.phase, progress: phaseProgress)
+
+                        scenePresentationLayerContent(
+                            presentation: presentation,
+                            presence: presence,
+                            phaseProgress: phaseProgress,
+                            size: proxy.size,
+                            bottomInset: bottomInset
+                        )
+                    }
+                    .ignoresSafeArea()
+                    .allowsHitTesting(true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func scenePresentationLayerContent(
+        presentation: ScenePresentationState,
+        presence: Double,
+        phaseProgress: Double,
+        size: CGSize,
+        bottomInset: CGFloat
+    ) -> some View {
+        ZStack {
+            scenePresentationBackdrop(for: presentation, presence: presence, progress: phaseProgress, size: size)
+            scenePresentationLetterbox(presence: presence, progress: phaseProgress, size: size)
+            scenePresentationCard(
+                presentation: presentation,
+                presence: presence,
+                phaseProgress: phaseProgress,
+                size: size,
+                bottomInset: bottomInset,
+                classmates: game.classmates,
+                playerSupport: game.player.support
+            )
+        }
+    }
+
+    private func scenePresentationCard(
+        presentation: ScenePresentationState,
+        presence: Double,
+        phaseProgress: Double,
+        size: CGSize,
+        bottomInset: CGFloat,
+        classmates: [Classmate],
+        playerSupport: Double
+    ) -> some View {
+        ScenePresentationCardView(
+            presentation: presentation,
+            presence: presence,
+            phaseProgress: phaseProgress,
+            maxWidth: min(size.width * CGFloat(0.74), CGFloat(700)),
+            bottomInset: bottomInset,
+            classmates: classmates,
+            playerSupport: playerSupport
+        )
+    }
+
+    private func scenePresentationCardPanel(
+        presentation: ScenePresentationState,
+        presence: Double,
+        phaseProgress: Double,
+        size: CGSize
+    ) -> AnyView {
+        AnyView(EmptyView())
+    }
+
+    @ViewBuilder
+    private func scenePresentationBackdrop(for presentation: ScenePresentationState, presence: Double, progress: Double, size: CGSize) -> some View {
+        switch presentation.transition {
+        case .fade:
+            scenePresentationFadeBackdrop(presentation: presentation, presence: presence, progress: progress, size: size)
+        case .colorTemperatureFlip:
+            scenePresentationColorTemperatureBackdrop(presentation: presentation, presence: presence, progress: progress, size: size)
+        case .mirrorRipple:
+            scenePresentationMirrorRippleBackdrop(presentation: presentation, presence: presence, progress: progress, size: size)
+        }
+    }
+
+    private func scenePresentationFadeBackdrop(presentation: ScenePresentationState, presence: Double, progress: Double, size: CGSize) -> some View {
+        let maxDimension = max(size.width, size.height)
+        return ZStack {
+            LinearGradient(
+                colors: [
+                    presentation.chapter.atmosphere.opacity(0.28 + presence * 0.16),
+                    .black.opacity(0.72)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [
+                    presentation.chapter.atmosphere.opacity(0.34 * presence),
+                    .clear,
+                    .black.opacity(0.84)
+                ],
+                center: .center,
+                startRadius: maxDimension * 0.04,
+                endRadius: maxDimension * 0.84
+            )
+            ForEach(0..<4, id: \.self) { index in
+                scenePresentationStreak(
+                    width: size.width * CGFloat(0.26 + Double(index) * 0.09),
+                    height: index.isMultiple(of: 2) ? 2.2 : 1.2,
+                    offset: CGFloat(index - 1) * CGFloat(16) + CGFloat(sin(progress * .pi * 2 + Double(index))) * 6,
+                    color: presentation.chapter.atmosphere.opacity(0.08 + Double(index) * 0.03),
+                    presence: presence
+                )
+            }
+        }
+        .blendMode(.screen)
+        .opacity(0.54 + presence * 0.28)
+    }
+
+    private func scenePresentationColorTemperatureBackdrop(presentation: ScenePresentationState, presence: Double, progress: Double, size: CGSize) -> some View {
+        return ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.96, green: 0.68, blue: 0.27).opacity(0.28 + presence * 0.18),
+                    presentation.chapter.atmosphere.opacity(0.22),
+                    Color(red: 0.34, green: 0.64, blue: 0.98).opacity(0.28 + presence * 0.16)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            ForEach(0..<10, id: \.self) { index in
+                scenePresentationStreak(
+                    width: 48 + CGFloat(index % 4) * 18,
+                    height: index.isMultiple(of: 3) ? 2.0 : 1.2,
+                    offset: 0,
+                    color: index.isMultiple(of: 2) ? Color.orange.opacity(0.14) : Color.cyan.opacity(0.14),
+                    presence: 0.14 + 0.18 * presence,
+                    x: size.width * CGFloat(0.1 + 0.8 * (Double(index) / 9.0)),
+                    y: size.height * CGFloat(0.18 + 0.62 * (Double((index * 7) % 10) / 9.0)) + CGFloat(sin(progress * .pi * 2 + Double(index))) * 5,
+                    rotation: index.isMultiple(of: 2) ? -10 : 9
+                )
+            }
+        }
+        .blendMode(.plusLighter)
+        .opacity(0.54 + presence * 0.28)
+    }
+
+    private func scenePresentationMirrorRippleBackdrop(presentation: ScenePresentationState, presence: Double, progress: Double, size: CGSize) -> some View {
+        return ZStack {
+            LinearGradient(
+                colors: [
+                    presentation.chapter.atmosphere.opacity(0.26 + presence * 0.14),
+                    .black.opacity(0.82)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            ForEach(0..<5, id: \.self) { index in
+                scenePresentationMirrorRing(index: index, progress: progress, size: size)
+            }
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            Color.white.opacity(0.12 + presence * 0.08),
+                            .clear
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: 10)
+                .position(x: size.width * CGFloat(0.5 + 0.03 * sin(progress * .pi * 4)), y: size.height / 2)
+                .blur(radius: 10)
+        }
+        .blendMode(.screen)
+        .opacity(0.54 + presence * 0.28)
+    }
+
+    @ViewBuilder
+    private func scenePresentationStreak(
+        width: CGFloat,
+        height: CGFloat,
+        offset: CGFloat,
+        color: Color,
+        presence: Double,
+        x: CGFloat? = nil,
+        y: CGFloat? = nil,
+        rotation: Double = 0
+    ) -> some View {
+        if let x, let y {
+            Capsule()
+                .fill(color)
+                .frame(width: width, height: height)
+                .rotationEffect(.degrees(rotation))
+                .position(x: x, y: y)
+                .blur(radius: 5)
+                .opacity(presence)
+        } else {
+            Capsule()
+                .fill(color)
+                .frame(width: width, height: height)
+                .rotationEffect(.degrees(rotation))
+                .offset(y: offset)
+                .blur(radius: 5)
+                .opacity(presence)
+        }
+    }
+
+    private func scenePresentationMirrorRing(index: Int, progress: Double, size: CGSize) -> some View {
+        Circle()
+            .stroke(.white.opacity(0.12 + Double(index) * 0.012), lineWidth: CGFloat(1 + index))
+            .frame(width: min(size.width, size.height) * CGFloat(0.22 + 0.11 * Double(index)))
+            .offset(
+                x: CGFloat(sin(Double(index) * 1.4 + progress * .pi * 2)) * 16,
+                y: CGFloat(cos(Double(index) * 1.2 + progress * .pi * 2)) * 10
+            )
+            .blur(radius: 0.9)
+    }
+
+    private func scenePresentationLetterbox(presence: Double, progress: Double, size: CGSize) -> some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(.black.opacity(0.9))
+                .frame(height: max(CGFloat(18), size.height * CGFloat(0.105 - presence * 0.012 + 0.002 * sin(progress * .pi * 2))))
+            Spacer(minLength: 0)
+            Rectangle()
+                .fill(.black.opacity(0.9))
+                .frame(height: max(CGFloat(18), size.height * CGFloat(0.105 - presence * 0.012 + 0.002 * sin(progress * .pi * 2))))
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func scenePresentationPresence(for phase: ScenePresentationPhase, progress: Double) -> Double {
+        switch phase {
+        case .prepare:
+            return 0.28 + progress * 0.72
+        case .commit:
+            return 1
+        case .cleanup:
+            return 1 - progress * 0.92
+        case .idle:
+            return 0
+        }
+    }
+
+    struct ScenePresentationCardView: View {
+        let presentation: ScenePresentationState
+        let presence: Double
+        let phaseProgress: Double
+        let maxWidth: CGFloat
+        let bottomInset: CGFloat
+        let classmates: [Classmate]
+        let playerSupport: Double
+
+        private var phaseLabel: String {
+            switch presentation.phase {
+            case .prepare: return "准备切入"
+            case .commit: return "镜头展开"
+            case .cleanup: return "收束离场"
+            case .idle: return "待命"
+            }
+        }
+
+        private var progressWidth: CGFloat {
+            max(8, maxWidth * CGFloat(presence))
+        }
+
+        var body: some View {
+            VStack {
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(presentation.chapter.atmosphere.opacity(0.24 + presence * 0.12))
+                            Image(systemName: presentation.transition.symbolName)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .frame(width: 38, height: 38)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(presentation.title)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Text(presentation.subtitle)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.78))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Label(phaseLabel, systemImage: presentation.transition.symbolName)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.84))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.white.opacity(0.08), in: Capsule())
+                    }
+
+                    HStack(spacing: 10) {
+                        Text(presentation.chapter.sceneSubtitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+
+                        Spacer(minLength: 8)
+
+                        Text("\(Int((presence * 100).rounded()))%")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.66))
+                    }
+
+                    if classmates.isEmpty == false {
+                        SceneEntryForecastStripView(
+                            chapter: presentation.chapter,
+                            classmates: classmates,
+                            playerSupport: playerSupport
+                        )
+                    }
+
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.12))
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            presentation.chapter.atmosphere.opacity(0.96),
+                                            .white.opacity(0.7)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: min(geo.size.width, progressWidth))
+                        }
+                    }
+                    .frame(height: 5)
+                }
+                .padding(18)
+                .frame(maxWidth: maxWidth, alignment: .leading)
+                .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 8))
+                .background(presentation.chapter.atmosphere.opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.24), radius: 16, y: 10)
+                .offset(y: CGFloat((1 - presence) * 18 + sin(phaseProgress * .pi) * 4))
+                .opacity(0.9 + presence * 0.1)
+                .padding(.horizontal, 24)
+                .padding(.bottom, bottomInset)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     private func cinematicStyle(for kind: ActiveEventKind) -> (tint: Color, edge: Color, opacity: Double, edgeOpacity: Double, pulse: Bool, blendMode: BlendMode) {
         switch kind {
         case .playerBreakdown:
@@ -1035,6 +2199,10 @@ struct ContentView: View {
             return (.gray, .white, 0.12, 0.48, true, .plusLighter)
         case .discovery:
             return (.orange, .red, 0.12, 0.58, true, .plusLighter)
+        case .linCheDialogue:
+            return (.mint, .cyan, 0.1, 0.42, false, .plusLighter)
+        case .noteDrop:
+            return (.yellow, .teal, 0.14, 0.52, true, .plusLighter)
         case .classmateCrying:
             return (.purple, .red, 0.12, 0.5, false, .plusLighter)
         case .classmateHelpRequest:
@@ -1073,65 +2241,138 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private func eventOverlay(_ event: ActiveEvent) -> some View {
-        VStack(spacing: 14) {
-            Text(event.title)
-                .font(.system(size: 24, weight: .bold))
-            Text(event.body)
-                .font(.system(size: 15))
-                .multilineTextAlignment(.center)
-                .lineLimit(5)
-                .frame(maxWidth: 620)
+        if event.kind == .noteDrop {
+            noteReadOverlay(event)
+        } else {
+            VStack(spacing: 14) {
+                Text(event.title)
+                    .font(.system(size: 24, weight: .bold))
+                Text(event.body)
+                    .font(.system(size: 15))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(5)
+                    .frame(maxWidth: 620)
 
-            HStack(spacing: 8) {
-                Image(systemName: "lightbulb.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.yellow)
-                Text(educationHint(for: event.kind))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .lineLimit(2)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: 560)
-            .liquidGlassPanel()
+                HStack(spacing: 8) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.yellow)
+                    Text(educationHint(for: event.kind))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: 560)
+                .liquidGlassPanel()
 
-            VStack(spacing: 8) {
-                ForEach(event.choices) { choice in
-                    Button {
-                        game.resolveEventChoice(choice)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(choice.title)
-                                    .font(.system(size: 13, weight: .bold))
-                                Text(choice.detail)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.68))
+                if event.kind == .playerBreakdown, game.activeBreakdownRecoverySteps.isEmpty == false {
+                    BreakdownRecoveryPanel(
+                        summary: game.breakdownRecoverySummary,
+                        steps: game.activeBreakdownRecoverySteps,
+                        completed: game.completedBreakdownRecoverySteps,
+                        current: game.currentBreakdownRecoveryStep
+                    )
+                    .frame(maxWidth: 560)
+                }
+
+                VStack(spacing: 8) {
+                    ForEach(event.choices) { choice in
+                        Button {
+                            game.resolveEventChoice(choice)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(choice.title)
+                                        .font(.system(size: 13, weight: .bold))
+                                    Text(choice.detail)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.68))
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 12, weight: .bold))
                             }
-                            Spacer()
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 12, weight: .bold))
+                            .padding(.horizontal, 12)
+                            .frame(width: 460)
+                            .frame(minHeight: 48)
                         }
-                        .padding(.horizontal, 12)
-                        .frame(width: 460)
-                        .frame(minHeight: 48)
+                        .buttonStyle(ActionButtonStyle())
+                    }
+                }
+
+                if event.choices.isEmpty {
+                    Button("继续晚自习") {
+                        game.continueAfterEvent()
                     }
                     .buttonStyle(ActionButtonStyle())
+                    .keyboardShortcut(.defaultAction)
                 }
             }
+            .padding(28)
+            .liquidGlassPanel()
+        }
+    }
 
-            if event.choices.isEmpty {
-                Button("继续晚自习") {
-                    game.continueAfterEvent()
+    private func noteReadOverlay(_ event: ActiveEvent) -> some View {
+        VStack(spacing: 18) {
+            Text(event.title)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.white.opacity(0.82))
+
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(red: 0.94, green: 0.96, blue: 0.9))
+                    .shadow(color: .black.opacity(0.34), radius: 24, y: 14)
+                VStack(spacing: 17) {
+                    ForEach(0..<5, id: \.self) { _ in
+                        Rectangle()
+                            .fill(.blue.opacity(0.16))
+                            .frame(height: 1)
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.top, 42)
+
+                Text(ChapterOneNoteDropCue.content)
+                    .font(.system(size: 22, weight: .medium, design: .serif))
+                    .foregroundStyle(.black.opacity(0.82))
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(8)
+                    .padding(.horizontal, 38)
+                    .padding(.vertical, 48)
+                    .frame(width: 420, height: 250, alignment: .center)
+
+                TornNoteEdge()
+                    .fill(.blue.opacity(0.28))
+                    .frame(width: 54, height: 74)
+                    .offset(x: 8, y: -12)
+            }
+            .frame(width: 420, height: 250)
+            .rotationEffect(.degrees(-1.6))
+
+            Text("你看见了，但还不知道是谁写的。")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            ForEach(event.choices) { choice in
+                Button {
+                    game.resolveEventChoice(choice)
+                } label: {
+                    Label(choice.title, systemImage: "tray.and.arrow.down.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(width: 240, height: 44)
                 }
                 .buttonStyle(ActionButtonStyle())
                 .keyboardShortcut(.defaultAction)
+                .help(choice.detail)
             }
         }
-        .padding(28)
-        .liquidGlassPanel()
+        .padding(30)
+        .liquidGlassPanel(tint: .yellow.opacity(0.08))
     }
 
     private func educationHint(for kind: ActiveEventKind) -> String {
@@ -1156,6 +2397,10 @@ struct ContentView: View {
             return "权力关系里的关心需要降低声音，也需要给对方选择。"
         case .discovery:
             return "违规行为背后可能是逃离、疲惫或求助，不只是态度问题。"
+        case .linCheDialogue:
+            return "低压力回应不是逼对方交代，而是给他一个可以稍后开口的位置。"
+        case .noteDrop:
+            return "匿名求助先被看见，不等于立刻追问来源；确认信号比猜答案更重要。"
         case .powerOutage:
             return "环境变化会改变风险，也会短暂暴露每个人的真实状态。"
         case .phoneNotification:
@@ -1725,28 +2970,1698 @@ struct ContentView: View {
     }
 
     private func resourcesPanel(_ resources: [SupportResource]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("心理支持资源")
-                .font(.system(size: 14, weight: .bold))
-            ForEach(resources) { resource in
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "phone.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.cyan)
-                        .frame(width: 14, height: 14)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(resource.title)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(resource.detail)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.7))
+        SupportResourceView(resources: resources)
+            .frame(maxWidth: 700, alignment: .leading)
+    }
+}
+
+struct TeacherTruthRoutePanel: View {
+    let summary: String
+    let objectives: [TeacherTruthObjective]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("真相二周目", systemImage: "eye.trianglebadge.exclamationmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.mint.opacity(0.9))
+                Text(summary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(objectives) { objective in
+                    VStack(spacing: 3) {
+                        Image(systemName: objective.isComplete ? "checkmark.circle.fill" : objective.symbol)
+                            .font(.system(size: 11, weight: .bold))
+                        Text(objective.title)
+                            .font(.system(size: 8.5, weight: .bold))
+                            .lineLimit(1)
                     }
+                    .foregroundStyle(objective.isComplete ? .mint.opacity(0.86) : .white.opacity(0.7))
+                    .frame(width: 78, height: 38)
+                    .background(.white.opacity(objective.isComplete ? 0.10 : 0.055), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.white.opacity(objective.isComplete ? 0.18 : 0.08), lineWidth: 1)
+                    )
+                    .help(objective.detail)
+                }
+            }
+        }
+    }
+}
+
+struct BreakdownRecoveryPanel: View {
+    let summary: String
+    let steps: [BreakdownRecoveryStep]
+    let completed: Set<BreakdownRecoveryStep>
+    let current: BreakdownRecoveryStep?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Label("恢复序列", systemImage: "heart.text.square.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.cyan.opacity(0.9))
+                Spacer()
+                Text(summary)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(steps) { step in
+                    let isDone = completed.contains(step)
+                    let isCurrent = current == step
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
+                            Image(systemName: isDone ? "checkmark.circle.fill" : step.symbol)
+                                .font(.system(size: 11, weight: .bold))
+                            Text(step.title)
+                                .font(.system(size: 10.5, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        Text(step.detail)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.64))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(isDone ? .mint.opacity(0.88) : (isCurrent ? .cyan.opacity(0.9) : .white.opacity(0.72)))
+                    .padding(9)
+                    .frame(maxWidth: .infinity, minHeight: 76, alignment: .topLeading)
+                    .background(.white.opacity(isDone ? 0.10 : (isCurrent ? 0.085 : 0.045)), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.white.opacity(isDone || isCurrent ? 0.18 : 0.08), lineWidth: 1)
+                    )
                 }
             }
         }
         .padding(12)
-        .frame(maxWidth: 700, alignment: .leading)
-        .liquidGlassPanel()
+        .background(.black.opacity(0.32), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+}
+
+struct PlaytestRouteTranscriptView: View {
+    let entries: [PlaytestRouteTranscriptEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Label("路线转录", systemImage: "waveform.path.ecg.rectangle")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.86))
+                Spacer()
+                Label("\(entries.count)", systemImage: "list.bullet.rectangle.portrait.fill")
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.mint.opacity(0.82))
+            }
+
+            if entries.isEmpty {
+                Text("等待一次真实输入")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.52))
+                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(entries) { entry in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                Text("#\(entry.step)")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.mint.opacity(0.86))
+                                    .frame(width: 34, height: 18)
+                                    .background(.mint.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.mint.opacity(0.18), lineWidth: 1))
+                                Text(entry.actor)
+                                    .font(.system(size: 8.5, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.58))
+                                    .lineLimit(1)
+                                Text(entry.input)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.94))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.78)
+                            }
+
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.system(size: 8.5, weight: .bold))
+                                    .foregroundStyle(.cyan.opacity(0.62))
+                                Text(entry.beforeState)
+                                    .lineLimit(1)
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.38))
+                                Text(entry.afterState)
+                                    .lineLimit(1)
+                            }
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.58))
+
+                            routeTranscriptSignalRow(entry)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
+                        .background(.white.opacity(entry.hasChoiceImpactFeedback || entry.hasSensoryPeerFeedback || entry.hasSpatialNavigationFeedback || entry.hasCompanionNavigationFeedback ? 0.07 : 0.045), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(routeTranscriptStroke(for: entry), lineWidth: 1)
+                        )
+                        .overlay(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(entry.hasFriction ? .orange.opacity(0.78) : .mint.opacity(0.45))
+                                .frame(width: 2)
+                                .padding(.vertical, 7)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func routeTranscriptSignalRow(_ entry: PlaytestRouteTranscriptEntry) -> some View {
+        if let choiceImpactFeedback = entry.choiceImpactFeedback {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Label(choiceImpactFeedback, systemImage: "waveform.path.ecg")
+                    .foregroundStyle(.orange.opacity(0.84))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Label(entry.friction, systemImage: entry.hasFriction ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(entry.hasFriction ? .orange.opacity(0.76) : .mint.opacity(0.62))
+                    .lineLimit(1)
+                    .frame(maxWidth: 138, alignment: .leading)
+            }
+            .font(.system(size: 8.5, weight: .medium))
+        } else if let sensoryFeedback = entry.sensoryPeerFeedback {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Label(sensoryFeedback, systemImage: "ear.and.waveform")
+                    .foregroundStyle(.mint.opacity(0.84))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Label(entry.friction, systemImage: entry.hasFriction ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(entry.hasFriction ? .orange.opacity(0.76) : .mint.opacity(0.62))
+                    .lineLimit(1)
+                    .frame(maxWidth: 138, alignment: .leading)
+            }
+            .font(.system(size: 8.5, weight: .medium))
+        } else if let spatialNavigationFeedback = entry.spatialNavigationFeedback {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Label(spatialNavigationFeedback, systemImage: "location.north.line.fill")
+                    .foregroundStyle(.cyan.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Label(entry.friction, systemImage: entry.hasFriction ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(entry.hasFriction ? .orange.opacity(0.76) : .mint.opacity(0.62))
+                    .lineLimit(1)
+                    .frame(maxWidth: 138, alignment: .leading)
+            }
+            .font(.system(size: 8.5, weight: .medium))
+        } else if let companionNavigationFeedback = entry.companionNavigationFeedback {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Label(companionNavigationFeedback, systemImage: "person.wave.2.fill")
+                    .foregroundStyle(.blue.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Label(entry.friction, systemImage: entry.hasFriction ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(entry.hasFriction ? .orange.opacity(0.76) : .mint.opacity(0.62))
+                    .lineLimit(1)
+                    .frame(maxWidth: 138, alignment: .leading)
+            }
+            .font(.system(size: 8.5, weight: .medium))
+        } else {
+            HStack(alignment: .top, spacing: 6) {
+                Label(entry.friction, systemImage: entry.hasFriction ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(entry.hasFriction ? .orange.opacity(0.86) : .mint.opacity(0.7))
+                    .lineLimit(1)
+                if let supportingFeedback = entry.supportingFeedback {
+                    Label(supportingFeedback, systemImage: "speaker.wave.2.fill")
+                        .foregroundStyle(.cyan.opacity(0.68))
+                        .lineLimit(1)
+                }
+            }
+            .font(.system(size: 8.5, weight: .medium))
+        }
+    }
+
+    private func routeTranscriptStroke(for entry: PlaytestRouteTranscriptEntry) -> Color {
+        if entry.hasChoiceImpactFeedback {
+            return .orange.opacity(0.26)
+        }
+        if entry.hasSensoryPeerFeedback {
+            return .mint.opacity(0.24)
+        }
+        if entry.hasSpatialNavigationFeedback {
+            return .cyan.opacity(0.22)
+        }
+        if entry.hasCompanionNavigationFeedback {
+            return .blue.opacity(0.22)
+        }
+        return .white.opacity(0.1)
+    }
+}
+
+struct TornNoteEdge: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + rect.width * 0.12, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.06))
+        path.addLine(to: CGPoint(x: rect.maxX * 0.92, y: rect.minY + rect.height * 0.24))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.38))
+        path.addLine(to: CGPoint(x: rect.maxX * 0.88, y: rect.minY + rect.height * 0.54))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.72))
+        path.addLine(to: CGPoint(x: rect.maxX * 0.78, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.18, y: rect.maxY * 0.88))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + rect.height * 0.52))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct ClassroomSupportWeatherStripView: View {
+    let classmates: [Classmate]
+    let playerSupport: Double
+
+    private var nodes: [ClassmateSupportWeatherNode] {
+        classmates
+            .map { mate in
+                ClassmateSupportWeatherNode(
+                    id: mate.id,
+                    name: mate.name,
+                    detail: supportWeatherDetail(for: mate),
+                    tint: supportWeatherTint(for: mate),
+                    strength: supportWeatherStrength(for: mate)
+                )
+            }
+            .sorted {
+                if $0.strength == $1.strength {
+                    return $0.id < $1.id
+                }
+                return $0.strength > $1.strength
+            }
+    }
+
+    private var leadNode: ClassmateSupportWeatherNode? {
+        nodes.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.cyan)
+                Text("支持天气")
+                    .font(.system(size: 10, weight: .bold))
+                Spacer()
+                Text("缓冲 \(Int(playerSupport))")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+
+            if let leadNode {
+                Text("当前最稳 \(leadNode.name)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            VStack(spacing: 5) {
+                ForEach(Array(nodes.prefix(2))) { node in
+                    supportWeatherRow(node)
+                }
+            }
+        }
+        .padding(7)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private func supportWeatherRow(_ node: ClassmateSupportWeatherNode) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Circle()
+                    .fill(node.tint.opacity(0.85))
+                    .frame(width: 6, height: 6)
+                Text(node.name)
+                    .font(.system(size: 9.5, weight: .bold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(Int(node.strength * 100))")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.52))
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.white.opacity(0.10))
+                    Capsule()
+                        .fill(node.tint.opacity(0.82))
+                        .frame(width: max(10, proxy.size.width * node.strength))
+                }
+            }
+            .frame(height: 4)
+
+            Text(node.detail)
+                .font(.system(size: 8.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.62))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(7)
+        .background(node.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(node.tint.opacity(0.20), lineWidth: 1)
+        )
+    }
+
+    private func supportWeatherStrength(for mate: Classmate) -> Double {
+        let emotionalWeight = mate.relationship * 0.55
+        let trustWeight = mate.support * 0.28
+        let suspicionPenalty = mate.suspicionOfPlayer * 0.42
+        let truthBoost = mate.hasSharedTruth ? 12.0 : 0.0
+        return (emotionalWeight + trustWeight + truthBoost - suspicionPenalty).clamped(to: 0...100) / 100
+    }
+
+    private func supportWeatherTint(for mate: Classmate) -> Color {
+        if mate.hasSharedTruth && mate.relationship > 58 { return .mint }
+        if mate.suspicionOfPlayer > 32 { return .orange }
+        if mate.relationship > 62 { return .cyan }
+        if mate.relationship < 24 { return .purple }
+        return .white
+    }
+
+    private func supportWeatherDetail(for mate: Classmate) -> String {
+        if mate.hasSharedTruth && mate.relationship > 58 { return "接住过一次真话" }
+        if mate.suspicionOfPlayer > 32 { return "还记得你的异常" }
+        if mate.relationship > 62 { return "愿意靠近一点" }
+        if mate.relationship < 24 { return "先保持距离" }
+        return mate.profile.signalReaction
+    }
+}
+
+struct ClassmateSupportWeatherNode: Identifiable {
+    let id: Int
+    let name: String
+    let detail: String
+    let tint: Color
+    let strength: Double
+}
+
+struct SceneEntryForecastStripView: View {
+    let chapter: NarrativeChapter
+    let classmates: [Classmate]
+    let playerSupport: Double
+
+    private var leadMate: Classmate? {
+        classmates.max { lhs, rhs in
+            supportScore(lhs) < supportScore(rhs)
+        }
+    }
+
+    private var leadLine: String {
+        guard let leadMate else { return "支持网络尚未成形" }
+        if leadMate.hasSharedTruth && leadMate.relationship > 58 {
+            return "\(leadMate.name)记得一次真话"
+        }
+        if leadMate.relationship > 62 {
+            return "\(leadMate.name)愿意靠近一点"
+        }
+        if leadMate.suspicionOfPlayer > 32 {
+            return "\(leadMate.name)正在观察你"
+        }
+        return "\(leadMate.name)是当前最稳信号"
+    }
+
+    private var pressureLine: String {
+        switch chapter {
+        case .classroom:
+            return "压力：低声观察"
+        case .mirror:
+            return "压力：呼吸被放大"
+        case .noteTrace:
+            return "压力：线索回流"
+        case .stairwell:
+            return "压力：位置要说清"
+        case .counseling:
+            return "压力：等待有重量"
+        case .epilogue:
+            return "压力：余波回看"
+        }
+    }
+
+    private var exitLine: String {
+        switch chapter {
+        case .classroom:
+            return "出口：先看见"
+        case .mirror:
+            return "出口：稳住呼吸"
+        case .noteTrace:
+            return "出口：找同伴"
+        case .stairwell:
+            return "出口：成人接手"
+        case .counseling:
+            return "出口：守住隐私"
+        case .epilogue:
+            return "出口：支持回到自己"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label("支持 \(Int(playerSupport))", systemImage: "point.3.connected.trianglepath.dotted")
+                .foregroundStyle(.cyan.opacity(0.9))
+            Divider()
+                .frame(height: 16)
+                .overlay(.white.opacity(0.18))
+            Text("最稳 \(leadLine)")
+                .foregroundStyle(.white.opacity(0.78))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 6)
+            Text(pressureLine)
+                .foregroundStyle(.orange.opacity(0.86))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(exitLine)
+                .foregroundStyle(.mint.opacity(0.86))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .font(.system(size: 10, weight: .bold))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("入场预报，支持 \(Int(playerSupport))，\(leadLine)，\(pressureLine)，\(exitLine)")
+    }
+
+    private func supportScore(_ mate: Classmate) -> Double {
+        let truth = mate.hasSharedTruth ? 12.0 : 0.0
+        return mate.relationship * 0.55 + mate.support * 0.28 + truth - mate.suspicionOfPlayer * 0.42
+    }
+}
+
+struct MainQuestHUDItem: Equatable {
+    let quest: String
+    let currentGoal: String
+    let hint: String?
+    let isUrgent: Bool
+}
+
+struct MainQuestHUD: View {
+    static let width: CGFloat = 220
+    static let questFontSize: CGFloat = 11
+    static let currentGoalFontSize: CGFloat = 14
+    static let defaultAnimationDuration = 0.3
+    static let reduceMotionAnimationDuration = 0.2
+
+    let item: MainQuestHUDItem
+    let reduceMotion: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: item.isUrgent ? "exclamationmark.triangle.fill" : "scope")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(item.isUrgent ? .orange.opacity(0.92) : .cyan.opacity(0.84))
+                    .frame(width: 15)
+                Text("主线任务")
+                    .font(.system(size: Self.questFontSize, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.50))
+                    .accessibilitySortPriority(3)
+            }
+
+            Text(item.quest)
+                .font(.system(size: Self.questFontSize, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.50))
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+                .accessibilitySortPriority(2)
+
+            Text(item.currentGoal)
+                .id(item.currentGoal)
+                .font(.system(size: Self.currentGoalFontSize, weight: .semibold))
+                .foregroundStyle(item.isUrgent ? .orange : .white)
+                .lineLimit(3)
+                .minimumScaleFactor(0.74)
+                .transition(goalTransition)
+                .accessibilitySortPriority(1)
+
+            if let hint = item.hint, hint.isEmpty == false {
+                Text(hint)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.cyan.opacity(0.76))
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.76)
+                    .accessibilitySortPriority(0)
+            }
+        }
+        .padding(10)
+        .frame(width: Self.width, alignment: .topLeading)
+        .background(.black.opacity(0.42), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(item.isUrgent ? .orange.opacity(0.28) : .white.opacity(0.14), lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(item.isUrgent ? .orange.opacity(0.78) : .cyan.opacity(0.58))
+                .frame(width: 3)
+                .padding(.vertical, 9)
+        }
+        .animation(
+            .easeInOut(duration: Self.animationDuration(reduceMotion: reduceMotion)),
+            value: item.currentGoal
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    static func animationDuration(reduceMotion: Bool) -> Double {
+        reduceMotion ? reduceMotionAnimationDuration : defaultAnimationDuration
+    }
+
+    private var goalTransition: AnyTransition {
+        if reduceMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity
+        )
+    }
+
+    private var accessibilitySummary: String {
+        let hintText = item.hint.map { "，提示，\($0)" } ?? ""
+        return "主线任务，\(item.quest)，当前目标，\(item.currentGoal)\(hintText)"
+    }
+}
+
+struct FeaturedMonologueView: View {
+    static let minimumPanelHeight: CGFloat = 190
+
+    let monologue: FeaturedMonologue
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 22) {
+                Text(monologue.text)
+                    .font(.custom("STXingkai", size: monologue.intensity >= 0.75 ? 34 : 30))
+                    .foregroundStyle(.white.opacity(0.96))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(10)
+                    .frame(maxWidth: 760)
+
+                Rectangle()
+                    .fill(.white.opacity(0.5))
+                    .frame(width: 54, height: 1)
+            }
+            .padding(.horizontal, 48)
+            .padding(.vertical, 30)
+            .frame(maxWidth: .infinity, minHeight: Self.minimumPanelHeight)
+            .background(.black.opacity(0.70 + monologue.intensity * 0.10), in: Rectangle())
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(.white.opacity(0.10))
+                    .frame(height: 1)
+            }
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onDismiss)
+        .transition(.opacity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(monologue.text)
+    }
+}
+
+struct AutonomousDirectorOverlay: View {
+    let status: String
+    let decision: String
+    let stepCount: Int
+    let soundscape: SensorySoundscape
+    let peerCue: SensoryPeerCue?
+    let latestEntry: PlaytestRouteTranscriptEntry?
+    let onTakeover: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 9) {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.mint.opacity(0.94))
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("自主导演")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.66))
+                    Text(decision)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.94))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.78)
+                }
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("#\(stepCount)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.mint.opacity(0.9))
+                    Text(status)
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.52))
+                        .lineLimit(1)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                directorSignalLine(
+                    icon: soundscapeIcon,
+                    title: "声场依据",
+                    detail: soundscape.recommendation,
+                    tint: soundscapeTint
+                )
+                if let peerCue {
+                    directorSignalLine(
+                        icon: "ear.and.waveform",
+                        title: "\(peerCue.classmateName) · \(peerCue.direction)",
+                        detail: peerCue.lowPressureAction,
+                        tint: peerCueTint(peerCue)
+                    )
+                }
+                if let latestEntry {
+                    directorSignalLine(
+                        icon: "arrow.triangle.branch",
+                        title: "最近路线",
+                        detail: latestEntry.afterState,
+                        tint: latestEntry.hasFriction ? .orange : .cyan
+                    )
+                }
+            }
+
+            HStack(spacing: 8) {
+                directorProgressBars
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: onTakeover) {
+                    Label("接管", systemImage: "stop.fill")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(.black.opacity(0.9))
+                        .frame(width: 66, height: 24)
+                        .background(.mint.opacity(0.9), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(.white.opacity(0.28), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("停止自主游玩，交还给玩家")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.mint.opacity(0.32), lineWidth: 1)
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(soundscapeTint.opacity(0.82))
+                .frame(width: 3)
+                .padding(.vertical, 10)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("自主导演，第 \(stepCount) 步，\(decision)。\(soundscape.recommendation)")
+    }
+
+    private var directorProgressBars: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<8, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(index < ((stepCount % 8) + 1) ? .mint.opacity(0.82) : .white.opacity(0.12))
+                    .frame(height: 5)
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func directorSignalLine(icon: String, title: String, detail: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(tint.opacity(0.86))
+                .frame(width: 18, height: 18)
+                .background(tint.opacity(0.28), in: RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(tint.opacity(0.34), lineWidth: 1))
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(tint.opacity(0.78))
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(tint.opacity(0.16), lineWidth: 1))
+    }
+
+    private var soundscapeIcon: String {
+        if soundscape.riskPressure >= 0.62 { return "exclamationmark.triangle.fill" }
+        if soundscape.bodyAlarm >= 0.52 { return "waveform.path.ecg" }
+        if soundscape.supportSignal >= 0.44 { return "ear.and.waveform" }
+        return "waveform.and.magnifyingglass"
+    }
+
+    private var soundscapeTint: Color {
+        if soundscape.riskPressure >= 0.62 { return .orange }
+        if soundscape.bodyAlarm >= 0.52 { return .pink }
+        if soundscape.supportSignal >= 0.44 { return .mint }
+        return .cyan
+    }
+
+    private func peerCueTint(_ cue: SensoryPeerCue) -> Color {
+        switch cue.tone {
+        case .warning:
+            return .orange
+        case .support:
+            return .mint
+        case .body:
+            return .pink
+        case .institution:
+            return .cyan
+        }
+    }
+}
+
+struct SensorySoundscapeView: View {
+    let soundscape: SensorySoundscape
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 4 : 9) {
+            HStack(spacing: 7) {
+                Image(systemName: symbolName)
+                    .font(.system(size: compact ? 10 : 13, weight: .bold))
+                    .foregroundStyle(accent.opacity(0.92))
+                    .frame(width: compact ? 14 : 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(soundscape.title)
+                        .font(.system(size: compact ? 10 : 13, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    Text(soundscape.subtitle)
+                        .font(.system(size: compact ? 8.5 : 10.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(compact ? 1 : 2)
+                        .minimumScaleFactor(0.72)
+                }
+                Spacer(minLength: 0)
+                Text("\(soundscape.cueCount)")
+                    .font(.system(size: compact ? 9 : 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+
+            if compact == false {
+                Text(soundscape.recommendation)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(accent.opacity(0.88))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    soundscapeGauge("风险", value: soundscape.riskPressure, tint: .orange)
+                    soundscapeGauge("支持", value: soundscape.supportSignal, tint: .mint)
+                    soundscapeGauge("身体", value: soundscape.bodyAlarm, tint: .pink)
+                    soundscapeGauge("制度", value: soundscape.institutionalPressure, tint: .cyan)
+                }
+            }
+        }
+        .padding(compact ? 7 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(compact ? 0.08 : 0.11), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.22), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(soundscape.title)，\(soundscape.subtitle)。\(soundscape.recommendation)")
+    }
+
+    private func soundscapeGauge(_ title: String, value: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 9.5, weight: .bold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(Int((value * 100).rounded()))")
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule()
+                        .fill(tint.opacity(0.82))
+                        .frame(width: geo.size.width * value.clamped(to: 0...1))
+                }
+            }
+            .frame(height: 5)
+        }
+        .frame(maxWidth: .infinity, minHeight: 32)
+    }
+
+    private var symbolName: String {
+        if soundscape.riskPressure >= 0.62 { return "exclamationmark.triangle.fill" }
+        if soundscape.bodyAlarm >= 0.52 { return "waveform.path.ecg" }
+        if soundscape.supportSignal >= 0.44 { return "ear.and.waveform" }
+        if soundscape.institutionalPressure >= 0.48 { return "building.columns.fill" }
+        return "waveform.and.magnifyingglass"
+    }
+
+    private var accent: Color {
+        if soundscape.riskPressure >= 0.62 { return .orange }
+        if soundscape.bodyAlarm >= 0.52 { return .pink }
+        if soundscape.supportSignal >= 0.44 { return .mint }
+        if soundscape.institutionalPressure >= 0.48 { return .cyan }
+        return .white
+    }
+}
+
+struct SeatedPosePressureView: View {
+    let feedback: SeatedPosePressureFeedback
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 5 : 8) {
+            HStack(spacing: 7) {
+                Image(systemName: symbolName)
+                    .font(.system(size: compact ? 10 : 13, weight: .bold))
+                    .foregroundStyle(accent.opacity(0.9))
+                    .frame(width: compact ? 14 : 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(feedback.title)
+                        .font(.system(size: compact ? 10 : 13, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                    Text(feedback.detail)
+                        .font(.system(size: compact ? 8.5 : 10.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(compact ? 1 : 2)
+                        .minimumScaleFactor(0.72)
+                }
+                Spacer(minLength: 0)
+                Text("\(Int((feedback.intensity * 100).rounded()))")
+                    .font(.system(size: compact ? 8.5 : 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(accent.opacity(0.84))
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule()
+                        .fill(accent.opacity(0.84))
+                        .frame(width: geo.size.width * feedback.intensity.clamped(to: 0...1))
+                }
+            }
+            .frame(height: compact ? 5 : 6)
+
+            if compact == false {
+                Text(feedback.recommendation)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(accent.opacity(0.88))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(compact ? 7 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(compact ? 0.08 : 0.11), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.22), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(feedback.title)，\(feedback.detail)。\(feedback.recommendation)")
+    }
+
+    private var symbolName: String {
+        switch feedback.tone {
+        case .stable:
+            return "person.crop.square"
+        case .risk:
+            return "exclamationmark.triangle.fill"
+        case .body:
+            return "waveform.path.ecg"
+        case .connection:
+            return "person.2.wave.2.fill"
+        }
+    }
+
+    private var accent: Color {
+        switch feedback.tone {
+        case .stable:
+            return .cyan
+        case .risk:
+            return .orange
+        case .body:
+            return .pink
+        case .connection:
+            return .mint
+        }
+    }
+}
+
+struct TeacherPatrolReadoutView: View {
+    let readout: TeacherPatrolReadout
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 5 : 8) {
+            HStack(spacing: 7) {
+                Image(systemName: symbolName)
+                    .font(.system(size: compact ? 10 : 13, weight: .bold))
+                    .foregroundStyle(accent.opacity(0.9))
+                    .frame(width: compact ? 14 : 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(readout.title)
+                        .font(.system(size: compact ? 10 : 13, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                    Text("\(readout.location.rawValue) · \(readout.detail)")
+                        .font(.system(size: compact ? 8.5 : 10.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(compact ? 1 : 2)
+                        .minimumScaleFactor(0.72)
+                }
+                Spacer(minLength: 0)
+                Text("\(Int((readout.intensity * 100).rounded()))")
+                    .font(.system(size: compact ? 8.5 : 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(accent.opacity(0.84))
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.12))
+                    Capsule()
+                        .fill(accent.opacity(0.84))
+                        .frame(width: geo.size.width * readout.intensity.clamped(to: 0...1))
+                }
+            }
+            .frame(height: compact ? 5 : 6)
+
+            if compact == false {
+                Text(readout.recommendation)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(accent.opacity(0.88))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(compact ? 7 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(compact ? 0.08 : 0.11), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.22), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(readout.title)，\(readout.detail)。\(readout.recommendation)")
+    }
+
+    private var symbolName: String {
+        switch readout.tone {
+        case .distant:
+            return "figure.stand"
+        case .approaching:
+            return "shoeprints.fill"
+        case .close:
+            return "person.crop.circle.badge.exclamationmark.fill"
+        case .unseen:
+            return "door.left.hand.closed"
+        }
+    }
+
+    private var accent: Color {
+        switch readout.tone {
+        case .distant:
+            return .cyan
+        case .approaching:
+            return .yellow
+        case .close:
+            return .orange
+        case .unseen:
+            return .purple
+        }
+    }
+}
+
+struct SpatialAudioObjectiveView: View {
+    let objective: SpatialAudioObjective
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 5 : 8) {
+            HStack(alignment: .center, spacing: 7) {
+                Image(systemName: objective.isLocated ? "ear.badge.checkmark" : "ear.and.waveform")
+                    .font(.system(size: compact ? 10 : 13, weight: .bold))
+                    .foregroundStyle(accent.opacity(0.94))
+                    .frame(width: compact ? 15 : 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(objective.title)
+                        .font(.system(size: compact ? 10 : 13, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.76)
+                    Text(objective.sourceLine)
+                        .font(.system(size: compact ? 8.5 : 10.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(compact ? 1 : 2)
+                        .minimumScaleFactor(0.72)
+                }
+                Spacer(minLength: 0)
+                Text(objective.targetPose.rawValue)
+                    .font(.system(size: compact ? 8.5 : 10.5, weight: .bold))
+                    .foregroundStyle(accent.opacity(0.82))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            HStack(spacing: 7) {
+                objectiveMeter
+                    .frame(maxWidth: .infinity)
+                Text(objective.isLocated ? objective.confirmAction : objective.locateAction)
+                    .font(.system(size: compact ? 8.5 : 10, weight: .bold))
+                    .foregroundStyle(accent.opacity(0.86))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            if compact == false {
+                Text(objective.statusLine)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(compact ? 7 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(compact ? 0.08 : 0.11), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.24), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("声源目标，\(objective.title)，方向 \(objective.direction)，\(objective.statusLine)")
+    }
+
+    private var objectiveMeter: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.12))
+                Capsule()
+                    .fill(accent.opacity(0.84))
+                    .frame(width: geo.size.width * objective.progress.clamped(to: 0...1))
+            }
+        }
+        .frame(height: compact ? 5 : 6)
+    }
+
+    private var accent: Color {
+        objective.isLocated ? .mint : .cyan
+    }
+}
+
+struct SensoryPeerCueView: View {
+    let cue: SensoryPeerCue
+    let compact: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: compact ? 6 : 9) {
+            Image(systemName: symbolName)
+                .font(.system(size: compact ? 9 : 13, weight: .bold))
+                .foregroundStyle(accent.opacity(0.9))
+                .frame(width: compact ? 13 : 18, height: compact ? 13 : 18)
+                .padding(.top, compact ? 1 : 2)
+            VStack(alignment: .leading, spacing: compact ? 2 : 5) {
+                HStack(spacing: 5) {
+                    Text(cue.direction)
+                        .font(.system(size: compact ? 8.5 : 10, weight: .bold))
+                        .foregroundStyle(accent.opacity(0.86))
+                        .lineLimit(1)
+                    Text(cue.classmateName)
+                        .font(.system(size: compact ? 8.5 : 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.64))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(cue.spokenLine)
+                    .font(.system(size: compact ? 9 : 11.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(compact ? 2 : 3)
+                    .minimumScaleFactor(0.78)
+                if compact == false {
+                    Text(cue.lowPressureAction)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(accent.opacity(0.82))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(compact ? 7 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(compact ? 0.07 : 0.1), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.2), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(cue.direction)，\(cue.classmateName)：\(cue.spokenLine)。\(cue.lowPressureAction)")
+    }
+
+    private var symbolName: String {
+        switch cue.tone {
+        case .warning:
+            return "eye.trianglebadge.exclamationmark.fill"
+        case .support:
+            return "text.bubble.fill"
+        case .body:
+            return "heart.text.square.fill"
+        case .institution:
+            return "building.columns.fill"
+        }
+    }
+
+    private var accent: Color {
+        switch cue.tone {
+        case .warning:
+            return .orange
+        case .support:
+            return .mint
+        case .body:
+            return .pink
+        case .institution:
+            return .cyan
+        }
+    }
+}
+
+struct DirectionalSubtitleStripView: View {
+    let events: [DirectionalSubtitleEvent]
+    let captionsEnabled: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if captionsEnabled == false {
+                Label("方向字幕关闭", systemImage: "captions.bubble")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            } else if events.isEmpty {
+                Label("等待声音事件", systemImage: "captions.bubble.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            } else {
+                ForEach(events) { event in
+                    HStack(spacing: 6) {
+                        Image(systemName: "captions.bubble.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.cyan.opacity(0.86))
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(event.kind.rawValue) · \(event.direction)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(.white.opacity(0.13))
+                                    Capsule().fill(.cyan.opacity(0.78)).frame(width: geo.size.width * event.intensity)
+                                }
+                            }
+                            .frame(height: 4)
+                        }
+                    }
+                    .help(event.note)
+                    .accessibilityLabel(event.accessibilitySummary)
+                }
+            }
+        }
+        .foregroundStyle(.white)
+    }
+}
+
+struct SoundRadarView: View {
+    let cues: [AudioCue]
+
+    var body: some View {
+        Canvas { context, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = min(size.width, size.height) / 2 - 3
+            var grid = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+            grid.move(to: CGPoint(x: center.x, y: center.y - radius))
+            grid.addLine(to: CGPoint(x: center.x, y: center.y + radius))
+            grid.move(to: CGPoint(x: center.x - radius, y: center.y))
+            grid.addLine(to: CGPoint(x: center.x + radius, y: center.y))
+            context.stroke(grid, with: .color(.white.opacity(0.18)), lineWidth: 1)
+
+            let listener = Path(ellipseIn: CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5))
+            context.fill(listener, with: .color(.white.opacity(0.7)))
+
+            let dominantCue = cues.prefix(5).max { lhs, rhs in lhs.intensity < rhs.intensity }
+
+            for cue in cues.prefix(5) {
+                let distance = radius * (0.22 + 0.7 * min(1, cue.intensity))
+                let point = CGPoint(
+                    x: center.x + cos(cue.radarAngleRadians) * distance,
+                    y: center.y + sin(cue.radarAngleRadians) * distance
+                )
+                let dotRadius = 2.5 + cue.intensity * 4.5
+                let dot = Path(ellipseIn: CGRect(x: point.x - dotRadius, y: point.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+                context.fill(dot, with: .color(color(for: cue.kind).opacity(0.48 + cue.intensity * 0.42)))
+                if cue.id == dominantCue?.id {
+                    var focus = Path()
+                    focus.move(to: center)
+                    focus.addLine(to: point)
+                    context.stroke(focus, with: .color(color(for: cue.kind).opacity(0.3)), lineWidth: 1.4)
+                    let ringInset = dotRadius + 3
+                    let ring = Path(ellipseIn: CGRect(x: point.x - ringInset, y: point.y - ringInset, width: ringInset * 2, height: ringInset * 2))
+                    context.stroke(ring, with: .color(color(for: cue.kind).opacity(0.95)), lineWidth: 1.8)
+                }
+            }
+        }
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        guard cues.isEmpty == false else { return "声音方向雷达，暂无突出声源" }
+        let summary = cues.prefix(5).map { "\($0.kind.rawValue)\($0.spatialReadout)" }.joined(separator: "，")
+        return "声音方向雷达，\(summary)"
+    }
+
+    private func color(for kind: AudioCueKind) -> Color {
+        switch kind {
+        case .footstep, .knock: return .orange
+        case .phone, .broadcast: return .blue
+        case .bell: return .teal
+        case .paper, .wrapper, .chair: return .yellow
+        case .whisper, .crying: return .cyan
+        case .lights: return .mint
+        case .heartbeat, .stomach: return .red
+        case .teacherCough, .teacherSigh: return .purple
+        }
+    }
+}
+
+struct AudioCueReadoutView: View {
+    let cue: AudioCue
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: compact ? 7 : 9) {
+            Image(systemName: icon(for: cue.kind))
+                .font(.system(size: compact ? 10 : 12, weight: .bold))
+                .foregroundStyle(color(for: cue.kind).opacity(0.9))
+                .frame(width: compact ? 14 : 18, height: compact ? 14 : 18)
+            VStack(alignment: .leading, spacing: compact ? 2 : 3) {
+                Text("\(cue.kind.rawValue) · \(cue.spatialReadout) · \(intensityText(cue.intensity))")
+                    .font(.system(size: compact ? 10 : 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Text("\(cue.tacticalSignalText)信号")
+                    .font(.system(size: compact ? 9 : 10, weight: .semibold))
+                    .foregroundStyle(color(for: cue.kind).opacity(0.82))
+                    .lineLimit(1)
+                Text("\(cue.direction)：\(cue.note)")
+                    .font(.system(size: compact ? 9 : 10))
+                    .foregroundStyle(.white.opacity(0.66))
+                    .lineLimit(compact ? 2 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                if compact == false {
+                    Text(advice(for: cue))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(color(for: cue.kind).opacity(0.88))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(compact ? 7 : 9)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(.white.opacity(compact ? 0.07 : 0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.12), lineWidth: 1))
+        .accessibilityLabel("声音，\(cue.kind.rawValue)，\(cue.spatialReadout)，\(cue.direction)，\(cue.note)")
+    }
+
+    private func intensityText(_ value: Double) -> String {
+        if value > 0.76 { return "很清楚" }
+        if value > 0.42 { return "能分辨" }
+        return "很轻"
+    }
+
+    private func advice(for cue: AudioCue) -> String {
+        switch cue.kind {
+        case .footstep, .knock:
+            return cue.direction.contains("后") ? "后方声音需要用余光确认，别贸然回头太久。" : "先降低暴露，再决定是否继续当前动作。"
+        case .phone, .wrapper:
+            return "这是容易暴露的小声源，适合立刻收手或切回低风险姿态。"
+        case .whisper, .paper, .crying:
+            return "这可能是支持或求助入口，用短句回应，别把对方推到全班视线里。"
+        case .heartbeat, .stomach:
+            return "身体声音变大时，先做低消耗恢复动作。"
+        case .teacherCough, .teacherSigh, .broadcast:
+            return "这是制度压力信号，观察节奏比立刻行动更稳。"
+        case .lights, .bell, .chair:
+            return "环境或姿态声音在提醒阶段变化，利用它遮蔽或收束动作。"
+        }
+    }
+
+    private func icon(for kind: AudioCueKind) -> String {
+        switch kind {
+        case .footstep: return "shoeprints.fill"
+        case .paper: return "doc.text.fill"
+        case .phone: return "iphone"
+        case .whisper: return "text.bubble.fill"
+        case .chair: return "chair.fill"
+        case .crying: return "drop.fill"
+        case .lights: return "lightbulb.fill"
+        case .heartbeat: return "heart.fill"
+        case .broadcast: return "speaker.wave.2.fill"
+        case .bell: return "bell.fill"
+        case .knock: return "door.left.hand.closed"
+        case .stomach: return "figure.core.training"
+        case .wrapper: return "takeoutbag.and.cup.and.straw.fill"
+        case .teacherCough: return "lungs.fill"
+        case .teacherSigh: return "wind"
+        }
+    }
+
+    private func color(for kind: AudioCueKind) -> Color {
+        switch kind {
+        case .footstep, .knock: return .orange
+        case .phone, .broadcast: return .blue
+        case .bell: return .teal
+        case .paper, .wrapper, .chair: return .yellow
+        case .whisper, .crying: return .cyan
+        case .lights: return .mint
+        case .heartbeat, .stomach: return .red
+        case .teacherCough, .teacherSigh: return .purple
+        }
+    }
+}
+
+struct NarrativeMinimalHUDControls: View {
+    let captionsEnabled: Bool
+    let onToggleCaptions: () -> Void
+    let onPause: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onToggleCaptions) {
+                Image(systemName: captionsEnabled ? "captions.bubble.fill" : "captions.bubble")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(captionsEnabled ? .cyan.opacity(0.92) : .white.opacity(0.72))
+                    .frame(width: 34, height: 30)
+                    .background(captionsEnabled ? .cyan.opacity(0.18) : .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(.white.opacity(0.16), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("方向字幕")
+            .accessibilityLabel("方向字幕")
+
+            Button(action: onPause) {
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .frame(width: 34, height: 30)
+                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(.white.opacity(0.16), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("暂停")
+            .accessibilityLabel("暂停")
+        }
+        .padding(6)
+        .background(.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.14), lineWidth: 1))
+    }
+}
+
+struct FocusFeedbackOverlay: View {
+    let feedback: DwellFocusFeedback
+    let reduceMotion: Bool
+    @State private var visible: Bool
+
+    init(feedback: DwellFocusFeedback, reduceMotion: Bool, initiallyVisible: Bool = false) {
+        self.feedback = feedback
+        self.reduceMotion = reduceMotion
+        _visible = State(initialValue: initiallyVisible)
+    }
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.clear)
+                .overlay(alignment: .center) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(accent.opacity(visible ? 0.5 : 0), lineWidth: 3)
+                        .padding(14)
+                        .blur(radius: 7)
+                }
+            Rectangle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            accent.opacity(visible ? 0.38 : 0),
+                            .white.opacity(visible ? 0.08 : 0),
+                            accent.opacity(visible ? 0.24 : 0)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: visible ? 5 : 1
+                )
+                .blur(radius: visible ? 10 : 3)
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            let duration = reduceMotion ? 0.2 : 0.32
+            withAnimation(.easeOut(duration: duration)) {
+                visible = true
+            }
+            let hold = reduceMotion ? 0.18 : 0.46
+            DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
+                withAnimation(.easeIn(duration: duration)) {
+                    visible = false
+                }
+            }
+        }
+        .id(feedback.id)
+        .accessibilityHidden(true)
+    }
+
+    private var accent: Color {
+        switch feedback.pose {
+        case .left, .right:
+            return .cyan
+        case .desk:
+            return .mint
+        case .forward, .board, .rear:
+            return .white
+        }
+    }
+}
+
+struct ChapterClueStackView: View {
+    static let maxVisibleClues = 5
+
+    let clues: [ChapterClue]
+
+    private var visibleClues: [ChapterClue] {
+        Array(clues.prefix(Self.maxVisibleClues))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "note.text.badge.plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.yellow.opacity(0.92))
+                    .frame(width: 14)
+                Text("线索便签")
+                    .font(.system(size: 11, weight: .bold))
+                Spacer()
+                Text("\(visibleClues.count)/5")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.yellow.opacity(0.78))
+            }
+
+            if visibleClues.isEmpty {
+                Text("看见异常后，便签会留在这里。")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.54))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(visibleClues.enumerated()), id: \.element.id) { index, clue in
+                        clueCard(clue, index: index)
+                            .offset(x: CGFloat(index) * 5, y: CGFloat(index) * 9)
+                            .zIndex(Double(index))
+                            .accessibilitySortPriority(Double(visibleClues.count - index))
+                    }
+                }
+                .frame(height: CGFloat(visibleClues.count - 1) * 9 + 72, alignment: .topLeading)
+            }
+        }
+        .padding(10)
+        .frame(width: 260, alignment: .topLeading)
+        .background(.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.yellow.opacity(0.16), lineWidth: 1))
+    }
+
+    private func clueCard(_ clue: ChapterClue, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Text("TURN \(clue.turn)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.black.opacity(0.46))
+                Spacer()
+                Circle()
+                    .fill(.black.opacity(0.18))
+                    .frame(width: 5, height: 5)
+            }
+            Text(clue.title)
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundStyle(.black.opacity(0.84))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+            Text(clue.detail)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.black.opacity(0.62))
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(width: 222, height: 72, alignment: .topLeading)
+        .background(
+            clueTint(index: index),
+            in: RoundedRectangle(cornerRadius: 6)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.black.opacity(0.10), lineWidth: 1))
+        .rotationEffect(.degrees(Double(index % 2 == 0 ? -1 : 1)))
+        .shadow(color: .black.opacity(0.22), radius: 5, x: 0, y: 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("线索便签，\(clue.title)，\(clue.detail)")
+    }
+
+    private func clueTint(index: Int) -> Color {
+        let tints: [Color] = [
+            Color(red: 1.0, green: 0.88, blue: 0.42),
+            Color(red: 0.92, green: 0.96, blue: 0.62),
+            Color(red: 1.0, green: 0.78, blue: 0.54),
+            Color(red: 0.82, green: 0.93, blue: 0.98),
+            Color(red: 0.94, green: 0.82, blue: 0.98)
+        ]
+        return tints[index % tints.count]
+    }
+}
+
+struct PrologueBeatEchoView: View {
+    let echo: PrologueBeatEcho
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: echo.symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.mint.opacity(0.85))
+                .frame(width: 15, height: 17)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(echo.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .lineLimit(2)
+                Text(echo.detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.white.opacity(0.64))
+                    .lineLimit(3)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(echo.title)。\(echo.detail)")
+    }
+}
+
+struct PrologueAccessibilityHintView: View {
+    let onOpenSettings: () -> Void
+    let onContinue: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Capsule()
+                .fill(Color(red: 0.20, green: 0.92, blue: 0.68))
+                .frame(width: 4, height: 72)
+                .shadow(color: Color(red: 0.20, green: 0.92, blue: 0.68).opacity(0.45), radius: 8)
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(Color(red: 0.20, green: 0.92, blue: 0.68).opacity(0.18))
+                            .frame(width: 24, height: 24)
+                        Image(systemName: "accessibility")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color(red: 0.20, green: 0.92, blue: 0.68))
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("辅助设置")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("字幕、声音和输入方式可以现在确认")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.white.opacity(0.66))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.84)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 8) {
+                    Button { onOpenSettings() } label: {
+                        Label("调整", systemImage: "slider.horizontal.3")
+                            .frame(width: 96, height: 30)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+
+                    Button { onContinue() } label: {
+                        Label("继续", systemImage: "checkmark")
+                            .frame(width: 88, height: 30)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 282, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.black.opacity(0.18))
+                .glassEffect(.regular, in: .rect(cornerRadius: 8))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.16), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("辅助设置提示。字幕、声音和输入方式可以现在确认。")
     }
 }
 

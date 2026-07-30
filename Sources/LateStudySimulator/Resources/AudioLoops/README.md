@@ -1,4 +1,4 @@
-Place optional real looping ambience files here.
+Built-in real looping ambience files live here.
 
 For quick local testing without rebuilding package resources, you can also place
 the same files in:
@@ -12,4 +12,11 @@ Expected base names:
 - ceiling_fan
 - outside_night
 
-If a file is missing, the app falls back to the built-in procedural ambience layer.
+If a file is missing, the app falls back to the procedural ambience layer.
+
+Source/provenance:
+- Some loops are converted and processed from "100 CC0 SFX 2" on OpenGameArt:
+  https://opengameart.org/content/100-cc0-sfx-2
+- Classroom-specific loops that were not available as direct matches were
+  generated locally with ffmpeg oscillators/noise filters.
+- See ../ATTRIBUTION.md for the per-file mapping.
