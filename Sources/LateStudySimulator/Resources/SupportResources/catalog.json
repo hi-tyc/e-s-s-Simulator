@@ -1,0 +1,37 @@
+{
+  "resources": [
+    {
+      "id": "cn-national-12356",
+      "region": "中国大陆",
+      "displayName": "全国统一心理援助热线",
+      "number": "12356",
+      "detail": "提供心理健康教育、心理咨询、心理疏导和心理危机干预；服务时间以所在地接听安排为准。",
+      "url": null,
+      "reviewedAt": "2026-07-23",
+      "sourceURL": "https://www.gov.cn/zhengce/zhengceku/202412/content_6994470.htm",
+      "sourceTitle": "国家卫生健康委关于应用 12356 全国统一心理援助热线电话号码的通知"
+    },
+    {
+      "id": "cn-emergency-adult-120-110",
+      "region": "中国大陆",
+      "displayName": "正在发生的人身危险",
+      "number": "120 / 110",
+      "detail": "请立即联系现场可信成人，并根据现场危险联系急救或公安。",
+      "url": null,
+      "reviewedAt": "2026-07-23",
+      "sourceURL": "local://late-study-simulator/safety-protocol/emergency",
+      "sourceTitle": "游戏内安全交接脚本"
+    },
+    {
+      "id": "school-counseling-room",
+      "region": "本校",
+      "displayName": "学校心理咨询室",
+      "number": null,
+      "detail": "开放时间、预约方式和紧急联系人以学校实际信息为准；优先联系班主任、校医或心理老师。",
+      "url": null,
+      "reviewedAt": "2026-07-23",
+      "sourceURL": "local://late-study-simulator/school-support-template",
+      "sourceTitle": "学校资源本地配置模板"
+    }
+  ]
+}
