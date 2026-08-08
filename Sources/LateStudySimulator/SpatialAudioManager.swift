@@ -23,6 +23,9 @@ final class SpatialAudioManager {
     private var targetFanAmount: Float = 0
     private var outsideAmount: Float = 0.08
     private var targetOutsideAmount: Float = 0.08
+    private var ambienceVolume: Float = 0.7
+    private var cueVolume: Float = 0.7
+    private(set) var dialogueVolume: Float = 0.7
     private let loopAssetNames = ["light_hum", "pen_scratch", "ceiling_fan", "outside_night"]
     private let supportedAudioExtensions = ["wav", "mp3", "m4a", "aif", "aiff", "caf"]
 
@@ -137,6 +140,13 @@ final class SpatialAudioManager {
         updateAmbientLoopVolumes(classroomNoise: classroomNoise)
     }
 
+    func setMixVolumes(dialogue: Double, ambience: Double, cues: Double) {
+        dialogueVolume = Float(dialogue.clamped(to: 0...1))
+        ambienceVolume = Float(ambience.clamped(to: 0...1))
+        cueVolume = Float(cues.clamped(to: 0...1))
+        updateAmbientLoopVolumes(classroomNoise: 0.25)
+    }
+
     func updateListener(position: SCNVector3, orientation: SCNVector3) {
         environment?.listenerPosition = AVAudio3DPoint(x: Float(position.x), y: Float(position.y), z: Float(position.z))
         environment?.listenerAngularOrientation = AVAudio3DAngularOrientation(
@@ -153,7 +163,8 @@ final class SpatialAudioManager {
 
     func playCue(kind: AudioCueKind, intensity: Double, position: SCNVector3) {
         guard engine.isRunning else { return }
-        if playAssetCue(kind: kind, intensity: intensity, position: position) {
+        let mixedIntensity = intensity * Double(cueVolume)
+        if playAssetCue(kind: kind, intensity: mixedIntensity, position: position) {
             return
         }
 
@@ -162,7 +173,7 @@ final class SpatialAudioManager {
         let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
         var phase = 0.0
         var frameCursor: AVAudioFrameCount = 0
-        let amplitude = Float(max(0.04, min(0.24, intensity * 0.2)))
+        let amplitude = Float(max(0.01, min(0.24, mixedIntensity * 0.2)))
 
         let cue = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
             let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
@@ -243,10 +254,10 @@ final class SpatialAudioManager {
     }
 
     private func updateAmbientLoopVolumes(classroomNoise: Double) {
-        loopPlayers["light_hum"]?.volume = 0.16
-        loopPlayers["pen_scratch"]?.volume = Float((0.08 + classroomNoise * 0.28).clamped(to: 0.04...0.36))
-        loopPlayers["ceiling_fan"]?.volume = targetFanAmount * 0.22
-        loopPlayers["outside_night"]?.volume = targetOutsideAmount * 0.24
+        loopPlayers["light_hum"]?.volume = 0.16 * ambienceVolume
+        loopPlayers["pen_scratch"]?.volume = Float((0.08 + classroomNoise * 0.28).clamped(to: 0.04...0.36)) * ambienceVolume
+        loopPlayers["ceiling_fan"]?.volume = targetFanAmount * 0.22 * ambienceVolume
+        loopPlayers["outside_night"]?.volume = targetOutsideAmount * 0.24 * ambienceVolume
     }
 
     private func audioLoopURL(named name: String) -> URL? {
