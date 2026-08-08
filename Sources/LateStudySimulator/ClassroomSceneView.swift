@@ -1,20 +1,23 @@
+import AppKit
+import CoreGraphics
 import SceneKit
 import SwiftUI
 
 @MainActor
 final class StudentInputSCNView: SCNView {
-    var onDragged: ((NSEvent) -> Void)?
     var onKeyChanged: ((NSEvent, Bool) -> Void)?
     var onModifierChanged: ((NSEvent) -> Void)?
+    var onWindowChanged: ((NSWindow?) -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
-    override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChanged?(window)
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        onDragged?(event)
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -54,6 +57,10 @@ struct ClassroomSceneView: NSViewRepresentable {
         context.coordinator.update(game: game)
     }
 
+    static func dismantleNSView(_ nsView: SCNView, coordinator: ClassroomCoordinator) {
+        coordinator.teardownInput()
+    }
+
     func makeCoordinator() -> ClassroomCoordinator {
         ClassroomCoordinator()
     }
@@ -69,6 +76,7 @@ final class ClassroomCoordinator {
     private let teacherPressureLightNode = SCNNode()
     private let ambientNode = SCNNode()
     private let playerPhoneNode = SCNNode()
+    private let playerSeatedPropsNode = SCNNode()
     private let blackboardStatusNode = SCNNode()
     private let clockHourHandNode = SCNNode()
     private let clockMinuteHandNode = SCNNode()
@@ -103,25 +111,42 @@ final class ClassroomCoordinator {
     private var lastPose: CameraPose = .forward
     private var lastViewMode: ViewMode = .student
     private var lastFreeRoamActive = false
+    private var lastPrologueBeat: PrologueBeatID?
+    private var lastPrologueActive = false
+    private var lastStudentLookYaw: Double = 0
+    private var lastStudentLookPitch: Double = 0
     private weak var currentGame: GameManager?
+    private weak var inputView: StudentInputSCNView?
     private var pressedKeys: Set<Character> = []
     private var movementTimer: Timer?
     private var lastMovementTick = Date()
+    private var pendingMouseDeltaX = 0.0
+    private var pendingMouseDeltaY = 0.0
+    private var wantsMouseLook = true
+    private var isMouseLookCaptured = false
+    private var cursorHiddenByDisplayAPI = false
+    private var keyMonitor: Any?
+    private var mouseMonitor: Any?
+    private weak var observedWindow: NSWindow?
+    private var windowObservers: [NSObjectProtocol] = []
 
     init() {
         buildScene()
     }
 
     func installInput(on view: StudentInputSCNView) {
-        view.onDragged = { [weak self] event in
-            self?.handleMouseDragged(event)
-        }
         view.onKeyChanged = { [weak self] event, isDown in
             self?.handleKey(event, isDown: isDown)
         }
         view.onModifierChanged = { [weak self] event in
             self?.handleModifier(event)
         }
+        view.onWindowChanged = { [weak self] window in
+            self?.observeWindow(window)
+        }
+        inputView = view
+        installMouseLookKeyMonitor()
+        installMouseLookMouseMonitor()
         movementTimer?.invalidate()
         movementTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -132,24 +157,47 @@ final class ClassroomCoordinator {
 
     func update(game: GameManager) {
         currentGame = game
+        scene.background.contents = game.isPrologueActive && game.prologueCurrentBeat == .gateArrival
+            ? NSColor(calibratedRed: 0.16, green: 0.2, blue: 0.27, alpha: 1)
+            : NSColor(calibratedRed: 0.04, green: 0.045, blue: 0.05, alpha: 1)
+        observeWindow(inputView?.window)
+        synchronizeMouseLook(for: game)
         let signature = profileSignature(for: game.classmates)
         if !game.classmates.isEmpty && signature != classmateProfileSignature {
             rebuildClassmates(with: game.classmates)
             classmateProfileSignature = signature
         }
 
-        if lastPose != game.cameraPose || lastViewMode != game.viewMode || lastFreeRoamActive != game.freeRoam.isActive {
+        let cameraContextChanged = lastViewMode != game.viewMode
+            || lastFreeRoamActive != game.freeRoam.isActive
+            || lastPrologueActive != game.isPrologueActive
+            || lastPrologueBeat != (game.isPrologueActive ? game.prologueCurrentBeat : nil)
+        let poseChanged = lastPose != game.cameraPose
+        let studentLookChanged = game.viewMode == .student && (
+            lastStudentLookYaw != game.studentLookYaw || lastStudentLookPitch != game.studentLookPitch
+        )
+        lastStudentLookYaw = game.studentLookYaw
+        lastStudentLookPitch = game.studentLookPitch
+
+        if cameraContextChanged {
             lastPose = game.cameraPose
             lastViewMode = game.viewMode
             lastFreeRoamActive = game.freeRoam.isActive
+            lastPrologueActive = game.isPrologueActive
+            lastPrologueBeat = game.isPrologueActive ? game.prologueCurrentBeat : nil
             SCNTransaction.begin()
             SCNTransaction.animationDuration = cameraTurnDuration(game: game)
             SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             applyCameraMode(game: game, teacherPosition: teacherNode.position)
             SCNTransaction.commit()
-        }
-        if game.freeRoam.isActive {
+        } else if poseChanged || studentLookChanged || game.freeRoam.isActive || game.isPrologueActive {
+            lastPose = game.cameraPose
+            lastViewMode = game.viewMode
+            lastFreeRoamActive = game.freeRoam.isActive
+            SCNTransaction.begin()
+            SCNTransaction.disableActions = true
             applyCameraMode(game: game, teacherPosition: teacherNode.position)
+            SCNTransaction.commit()
         }
 
         let teacherPath: [SCNVector3] = [
@@ -181,7 +229,7 @@ final class ClassroomCoordinator {
             let fatigue = game.viewMode == .teacher ? game.teacher.fatigue / 140 : 1 - game.player.focusQuality
             let eventIntensity = eventVisualIntensity(game: game)
             camera.fStop = 1.6 + fatigue * 7.0 + eventIntensity.blur
-            camera.focusDistance = game.viewMode == .teacher ? 4.2 : (game.cameraPose == .desk ? 0.55 : (game.cameraPose == .board ? 5.8 : 1.5))
+            camera.focusDistance = game.viewMode == .teacher ? 4.2 : studentFocusDistance(game: game)
             camera.vignettingIntensity = 0.45 + fatigue * 1.15 + eventIntensity.vignette
             camera.vignettingPower = 0.8 + fatigue * 1.5 + eventIntensity.vignette
             camera.saturation = CGFloat(1.0 - fatigue * 0.34 - eventIntensity.desaturation)
@@ -200,6 +248,7 @@ final class ClassroomCoordinator {
     }
 
     private func buildScene() {
+        scene.rootNode.addChildNode(makePrologueExterior())
         scene.rootNode.addChildNode(makeEnvironment())
         scene.rootNode.addChildNode(makeCorridor())
         scene.rootNode.addChildNode(makeFurniture())
@@ -231,6 +280,10 @@ final class ClassroomCoordinator {
     }
 
     private func applyCameraMode(game: GameManager, teacherPosition: SCNVector3) {
+        if game.isPrologueActive {
+            applyPrologueCamera(game: game)
+            return
+        }
         switch game.viewMode {
         case .student:
             if game.freeRoam.isActive {
@@ -253,12 +306,177 @@ final class ClassroomCoordinator {
         }
     }
 
+    private func applyPrologueCamera(game: GameManager) {
+        switch game.prologueCurrentBeat {
+        case .gateArrival:
+            let arrival = Self.prologueArrivalCamera(
+                elapsed: game.prologueBeatElapsed,
+                reduceMotion: game.accessibilityPreferences.reduceMotion
+            )
+            cameraRig.position = arrival.position
+            cameraRig.eulerAngles = SCNVector3(-0.03, arrival.yaw, 0)
+            cameraRig.camera?.fieldOfView = 76
+        case .lookDownHall:
+            cameraRig.position = SCNVector3(5.25, 1.58, 7.3)
+            cameraRig.eulerAngles = SCNVector3(Float(game.studentLookPitch), Float(game.studentLookYaw), 0)
+            cameraRig.camera?.fieldOfView = 88
+        case .returnToSeat:
+            if game.prologueActionReady {
+                cameraRig.position = SCNVector3(-0.6, 1.18, 1.5)
+                cameraRig.eulerAngles = SCNVector3(0, 0, 0)
+                cameraRig.camera?.fieldOfView = 94
+            } else {
+                cameraRig.position = SCNVector3(Float(game.freeRoam.positionX), 1.58, Float(game.freeRoam.positionZ))
+                cameraRig.eulerAngles = SCNVector3(Float(game.freeRoam.pitch), Float(game.freeRoam.yaw), 0)
+                cameraRig.camera?.fieldOfView = 90
+            }
+        case .placeWater:
+            cameraRig.position = SCNVector3(-0.6, 1.18, 1.5)
+            cameraRig.eulerAngles = SCNVector3(-0.5, 0, 0)
+            cameraRig.camera?.fieldOfView = 82
+        case .studyHallRhythm, .noticeLinChe, .settleBreath, .accessibility, .bellBeforeClass:
+            cameraRig.position = SCNVector3(-0.6, 1.18, 1.5)
+            cameraRig.eulerAngles = SCNVector3(Float(game.studentLookPitch), Float(game.studentLookYaw), 0)
+            cameraRig.camera?.fieldOfView = 94
+        }
+    }
+
+    static func prologueArrivalCamera(elapsed: TimeInterval, reduceMotion: Bool) -> (position: SCNVector3, yaw: Float) {
+        let progress = Float((elapsed / 7).clamped(to: 0...1))
+        let fullYaw: Float
+        if progress < 0.42 {
+            fullYaw = -0.68 * (progress / 0.42)
+        } else if progress < 0.72 {
+            fullYaw = -0.68 + 1.36 * ((progress - 0.42) / 0.3)
+        } else {
+            fullYaw = 0.68 * (1 - (progress - 0.72) / 0.28)
+        }
+
+        // Accessibility reduces rotation intensity, while forward movement and
+        // the seven-second timing remain intact.
+        let yaw = fullYaw * (reduceMotion ? 0.35 : 1)
+        let position = SCNVector3(17.8, 1.62, 19.5 - 10.5 * progress)
+        return (position, yaw)
+    }
+
+    private func makePrologueExterior() -> SCNNode {
+        let root = SCNNode()
+        root.name = "prologueExterior"
+
+        let ground = SCNNode(geometry: SCNBox(width: 12, height: 0.08, length: 18, chamferRadius: 0))
+        ground.position = SCNVector3(17.8, -0.08, 12)
+        ground.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.24, alpha: 1)
+        root.addChildNode(ground)
+
+        let building = SCNNode(geometry: SCNBox(width: 10, height: 7, length: 1.2, chamferRadius: 0.08))
+        building.position = SCNVector3(17.8, 3.5, 5)
+        building.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedRed: 0.48, green: 0.5, blue: 0.48, alpha: 1)
+        root.addChildNode(building)
+
+        let signGeometry = SCNText(string: "教学楼", extrusionDepth: 0.015)
+        signGeometry.font = NSFont.systemFont(ofSize: 0.42, weight: .semibold)
+        signGeometry.firstMaterial?.diffuse.contents = NSColor(calibratedWhite: 0.86, alpha: 1)
+        let sign = SCNNode(geometry: signGeometry)
+        sign.scale = SCNVector3(1, 1, 1)
+        sign.position = SCNVector3(16.95, 6.15, 5.64)
+        root.addChildNode(sign)
+
+        for floor in 0..<3 {
+            for column in 0..<6 {
+                let window = SCNNode(geometry: SCNBox(width: 1.05, height: 0.9, length: 0.05, chamferRadius: 0.03))
+                window.position = SCNVector3(14.6 + Float(column) * 1.28, 1.35 + Float(floor) * 1.75, 5.64)
+                window.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedRed: 0.96, green: 0.82, blue: 0.5, alpha: 1)
+                window.geometry?.firstMaterial?.emission.contents = NSColor(calibratedRed: 0.28, green: 0.2, blue: 0.08, alpha: 1)
+                root.addChildNode(window)
+            }
+        }
+
+        let gateLeft = SCNNode(geometry: SCNBox(width: 0.35, height: 2.4, length: 0.35, chamferRadius: 0.03))
+        gateLeft.position = SCNVector3(14.3, 1.2, 16.2)
+        gateLeft.geometry?.firstMaterial?.diffuse.contents = NSColor.darkGray
+        root.addChildNode(gateLeft)
+        let gateRight = gateLeft.clone()
+        gateRight.position.x = 21.3
+        root.addChildNode(gateRight)
+
+        for index in 0..<6 {
+            let student = makePrologueStudentSilhouette(index: index)
+            root.addChildNode(student)
+        }
+
+        for index in 0..<8 {
+            let tree = makePrologueTree(index: index)
+            root.addChildNode(tree)
+        }
+
+        let dusk = SCNLight()
+        dusk.type = .omni
+        dusk.color = NSColor(calibratedRed: 1, green: 0.58, blue: 0.32, alpha: 1)
+        dusk.intensity = 760
+        dusk.attenuationEndDistance = 24
+        let duskNode = SCNNode()
+        duskNode.light = dusk
+        duskNode.position = SCNVector3(12, 6, 18)
+        root.addChildNode(duskNode)
+        return root
+    }
+
+    private func makePrologueStudentSilhouette(index: Int) -> SCNNode {
+        let root = SCNNode()
+        let body = SCNNode(geometry: SCNCapsule(capRadius: 0.16, height: 0.76))
+        body.position.y = 0.62
+        body.geometry?.firstMaterial?.diffuse.contents = index.isMultiple(of: 2)
+            ? NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.35, alpha: 1)
+            : NSColor(calibratedRed: 0.28, green: 0.2, blue: 0.25, alpha: 1)
+        root.addChildNode(body)
+        let head = SCNNode(geometry: SCNSphere(radius: 0.15))
+        head.position.y = 1.15
+        head.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedRed: 0.55, green: 0.4, blue: 0.3, alpha: 1)
+        root.addChildNode(head)
+        root.position = SCNVector3(15.2 + Float(index % 3) * 1.35, 0, 18.5 + Float(index / 3) * 2.2)
+        let delay = SCNAction.wait(duration: Double(index) * 1.4)
+        let walk = SCNAction.moveBy(x: 0, y: 0, z: -12.2, duration: 14 + Double(index % 3))
+        walk.timingMode = .easeInEaseOut
+        let reset = SCNAction.moveBy(x: 0, y: 0, z: 12.2, duration: 0)
+        root.runAction(.repeatForever(.sequence([delay, walk, .wait(duration: 4), reset])))
+        return root
+    }
+
+    private func makePrologueTree(index: Int) -> SCNNode {
+        let root = SCNNode()
+        let trunk = SCNNode(geometry: SCNCylinder(radius: 0.12, height: 1.55))
+        trunk.position.y = 0.78
+        trunk.geometry?.firstMaterial?.diffuse.contents = NSColor(calibratedRed: 0.2, green: 0.13, blue: 0.09, alpha: 1)
+        root.addChildNode(trunk)
+        let canopy = SCNNode(geometry: SCNSphere(radius: 0.72 + CGFloat(index % 3) * 0.12))
+        canopy.position.y = 1.85
+        canopy.scale = SCNVector3(1, 1.25, 1)
+        canopy.geometry?.firstMaterial?.diffuse.contents = index.isMultiple(of: 2)
+            ? NSColor(calibratedRed: 0.12, green: 0.28, blue: 0.2, alpha: 1)
+            : NSColor(calibratedRed: 0.18, green: 0.34, blue: 0.22, alpha: 1)
+        root.addChildNode(canopy)
+        let side: Float = index.isMultiple(of: 2) ? -1 : 1
+        root.position = SCNVector3(17.8 + side * (3.5 + Float(index / 2) * 1.25), 0, 8.2 + Float(index % 4) * 2.8)
+        let scale = 0.8 + Float(index % 3) * 0.12
+        root.scale = SCNVector3(scale, scale, scale)
+        return root
+    }
+
     private func cameraTurnDuration(game: GameManager) -> Double {
-        guard game.viewMode == .student else { return 0.35 }
-        let stressDelay = game.player.stress / 180
-        let attentionDelay = max(0, 45 - game.player.visualAttention) / 90
-        let teacherDelay = game.teacher.isNearPlayer ? 0.22 : 0
-        return (0.28 + stressDelay + attentionDelay + teacherDelay).clamped(to: 0.28...1.15)
+        if game.accessibilityPreferences.reduceMotion { return 0.25 }
+        return game.viewMode == .student ? 0.16 : 0.28
+    }
+
+    private func studentFocusDistance(game: GameManager) -> Double {
+        if abs(game.studentLookYaw) > 2.35 {
+            return 2.4
+        }
+        if game.studentLookPitch < 0 {
+            let deskAmount = (-game.studentLookPitch / 0.72).clamped(to: 0...1)
+            return 1.5 + (0.55 - 1.5) * deskAmount
+        }
+        let boardAmount = (game.studentLookPitch / 0.48).clamped(to: 0...1)
+        return 1.5 + (5.8 - 1.5) * boardAmount
     }
 
     private func teacherEulerAngles(from: SCNVector3, to: SCNVector3) -> SCNVector3 {
@@ -287,20 +505,48 @@ final class ClassroomCoordinator {
         }
     }
 
-    private func handleMouseDragged(_ event: NSEvent) {
-        currentGame?.rotateStudentView(deltaX: event.deltaX, deltaY: event.deltaY)
+    private func handleMouseMovement(_ event: NSEvent) {
+        guard isMouseLookCaptured else { return }
+        guard let game = currentGame, game.activeRole.isTeacher == false else { return }
+        guard case .playing = game.gameState, game.isReturningToSeat == false else { return }
+        guard event.deltaX != 0 || event.deltaY != 0 else { return }
+        pendingMouseDeltaX += event.deltaX
+        pendingMouseDeltaY += event.deltaY
     }
 
     private func handleKey(_ event: NSEvent, isDown: Bool) {
-        let character: Character
-        if event.keyCode == 49 {
-            character = " "
-        } else if let first = event.charactersIgnoringModifiers?.lowercased().first {
-            character = first
-        } else {
+        // The window-level monitor owns this shortcut so focused SceneKit input
+        // cannot toggle capture a second time for the same key event.
+        if isMouseLookToggle(event) {
             return
         }
-        guard character == " " else { return }
+        if Self.isTutorialToggle(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers) {
+            if isDown && event.isARepeat == false {
+                currentGame?.toggleCurrentPrologueTutorial()
+            }
+            return
+        }
+        if Self.isCompleteTutorialKey(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers) {
+            if isDown && event.isARepeat == false {
+                currentGame?.completeCurrentPrologueEarly()
+            }
+            return
+        }
+        if event.keyCode == 49 {
+            if isDown && event.isARepeat == false {
+                currentGame?.confirmPrologueInteraction()
+            }
+            return
+        }
+        if event.keyCode == 14 {
+            if isDown && event.isARepeat == false {
+                if currentGame?.confirmPrologueSeat() != true {
+                    currentGame?.interactWithNearbyDoor()
+                }
+            }
+            return
+        }
+        guard let character = movementCharacter(for: event) else { return }
         if isDown {
             pressedKeys.insert(character)
         } else {
@@ -308,24 +554,225 @@ final class ClassroomCoordinator {
         }
     }
 
+    private func movementCharacter(for event: NSEvent) -> Character? {
+        switch event.keyCode {
+        case 13: return "w"
+        case 0: return "a"
+        case 1: return "s"
+        case 2: return "d"
+        default:
+            guard let character = event.charactersIgnoringModifiers?.lowercased().first,
+                  "wasd".contains(character) else {
+                return nil
+            }
+            return character
+        }
+    }
+
     private func handleModifier(_ event: NSEvent) {
-        currentGame?.setFreeRoamSideways(event.modifierFlags.contains(.shift))
+        synchronizeMovementModifiers(event.modifierFlags)
+    }
+
+    private func synchronizeMovementModifiers(_ flags: NSEvent.ModifierFlags) {
+        currentGame?.setFreeRoamSideways(flags.contains(.shift))
+        currentGame?.setFreeRoamSprinting(flags.contains(.control))
     }
 
     private func tickMovement() {
+        let isLooking = pendingMouseDeltaX != 0 || pendingMouseDeltaY != 0
+        applyPendingMouseLook()
+        currentGame?.updatePrologueLookExploration(isMoving: isLooking, delta: 1.0 / 60.0)
+        currentGame?.updatePrologueDwell(delta: 1.0 / 60.0)
         guard let game = currentGame, game.freeRoam.isActive else {
             lastMovementTick = Date()
             return
         }
+        synchronizeMovementModifiers(NSEvent.modifierFlags)
         let now = Date()
         let delta = min(0.05, now.timeIntervalSince(lastMovementTick))
         lastMovementTick = now
 
-        var forward = 0.0
-        if pressedKeys.contains(" ") { forward = 1 }
-        if forward != 0 {
-            game.moveStudentFreeRoam(forward: forward, strafe: 0, deltaTime: delta)
+        let forward = (pressedKeys.contains("w") ? 1.0 : 0.0) - (pressedKeys.contains("s") ? 1.0 : 0.0)
+        let strafe = (pressedKeys.contains("d") ? 1.0 : 0.0) - (pressedKeys.contains("a") ? 1.0 : 0.0)
+        if forward != 0 || strafe != 0 {
+            game.moveStudentFreeRoam(forward: forward, strafe: strafe, deltaTime: delta)
         }
+    }
+
+    private func applyPendingMouseLook() {
+        guard pendingMouseDeltaX != 0 || pendingMouseDeltaY != 0 else { return }
+        guard let game = currentGame, game.activeRole.isTeacher == false else {
+            pendingMouseDeltaX = 0
+            pendingMouseDeltaY = 0
+            return
+        }
+        guard case .playing = game.gameState else {
+            pendingMouseDeltaX = 0
+            pendingMouseDeltaY = 0
+            return
+        }
+        let deltaX = pendingMouseDeltaX
+        let deltaY = pendingMouseDeltaY
+        pendingMouseDeltaX = 0
+        pendingMouseDeltaY = 0
+        game.rotateStudentView(deltaX: deltaX, deltaY: deltaY)
+    }
+
+    private func installMouseLookKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if self.isMouseLookToggle(event) {
+                self.toggleMouseLook()
+                return nil
+            }
+            if Self.isTutorialToggle(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers),
+               self.currentGame?.isPrologueActive == true {
+                self.currentGame?.toggleCurrentPrologueTutorial()
+                return nil
+            }
+            if Self.isCompleteTutorialKey(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers),
+               self.currentGame?.isPrologueActive == true {
+                self.currentGame?.completeCurrentPrologueEarly()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func installMouseLookMouseMonitor() {
+        guard mouseMonitor == nil else { return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [
+                .mouseMoved,
+                .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+                .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+                .otherMouseDown, .otherMouseUp, .otherMouseDragged
+            ]
+        ) { [weak self] event in
+            guard let self else { return event }
+            self.handleMouseMovement(event)
+            return event
+        }
+    }
+
+    private func isMouseLookToggle(_ event: NSEvent) -> Bool {
+        Self.isMouseLookToggle(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers)
+    }
+
+    static func isMouseLookToggle(keyCode: UInt16, characters: String?) -> Bool {
+        // The physical key above Tab is stable across Chinese/English input methods.
+        keyCode == 50 || characters == "`" || characters == "~" || characters == "～"
+    }
+
+    static func isTutorialToggle(keyCode: UInt16, characters: String?) -> Bool {
+        keyCode == 17 || characters?.lowercased() == "t"
+    }
+
+    static func isCompleteTutorialKey(keyCode: UInt16, characters: String?) -> Bool {
+        keyCode == 8 || characters?.lowercased() == "c"
+    }
+
+    private func canCaptureMouse(for game: GameManager) -> Bool {
+        guard game.activeRole.isTeacher == false else { return false }
+        guard case .playing = game.gameState else { return false }
+        guard game.isReturningToSeat == false else { return false }
+        guard game.isPrologueActive == false || game.prologuePaused == false else { return false }
+        return inputView?.window?.isKeyWindow == true
+    }
+
+    private func synchronizeMouseLook(for game: GameManager) {
+        wantsMouseLook = game.mouseLookEnabled
+        setMouseLookCaptured(wantsMouseLook && canCaptureMouse(for: game))
+    }
+
+    private func toggleMouseLook() {
+        guard let game = currentGame, game.activeRole.isTeacher == false else { return }
+        guard case .playing = game.gameState else { return }
+        wantsMouseLook.toggle()
+        game.mouseLookEnabled = wantsMouseLook
+        synchronizeMouseLook(for: game)
+        game.message = isMouseLookCaptured
+            ? "鼠标视角已捕获。移动鼠标可自由环视；按 ~ 释放鼠标以操作界面。"
+            : "鼠标已释放。按 ~ 重新捕获鼠标，继续用移动鼠标控制视角。"
+    }
+
+    private func setMouseLookCaptured(_ captured: Bool) {
+        guard isMouseLookCaptured != captured else { return }
+        isMouseLookCaptured = captured
+        if captured == false {
+            pendingMouseDeltaX = 0
+            pendingMouseDeltaY = 0
+            pressedKeys.removeAll()
+            currentGame?.clearFreeRoamMovementModifiers()
+        }
+        if captured {
+            inputView?.window?.makeFirstResponder(inputView)
+            CGAssociateMouseAndMouseCursorPosition(0)
+            NSCursor.hide()
+            if CGDisplayHideCursor(CGMainDisplayID()) == .success {
+                cursorHiddenByDisplayAPI = true
+            }
+            recenterMouseCursor()
+        } else {
+            CGAssociateMouseAndMouseCursorPosition(1)
+            if cursorHiddenByDisplayAPI {
+                CGDisplayShowCursor(CGMainDisplayID())
+                cursorHiddenByDisplayAPI = false
+            }
+            NSCursor.unhide()
+            inputView?.window?.makeFirstResponder(nil)
+        }
+        currentGame?.mouseLookCaptured = captured
+    }
+
+    private func recenterMouseCursor() {
+        guard let inputView, let window = inputView.window else { return }
+        let viewCenter = NSPoint(x: inputView.bounds.midX, y: inputView.bounds.midY)
+        let windowPoint = inputView.convert(viewCenter, to: nil)
+        CGWarpMouseCursorPosition(window.convertPoint(toScreen: windowPoint))
+    }
+
+    private func observeWindow(_ window: NSWindow?) {
+        guard observedWindow !== window else { return }
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers = []
+        observedWindow = window
+        guard let window else {
+            setMouseLookCaptured(false)
+            return
+        }
+        window.acceptsMouseMovedEvents = true
+        let notificationCenter = NotificationCenter.default
+        windowObservers = [
+            notificationCenter.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.setMouseLookCaptured(false)
+                }
+            },
+            notificationCenter.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let game = self.currentGame else { return }
+                    self.synchronizeMouseLook(for: game)
+                }
+            }
+        ]
+    }
+
+    func teardownInput() {
+        movementTimer?.invalidate()
+        movementTimer = nil
+        setMouseLookCaptured(false)
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers = []
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
+        keyMonitor = nil
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+        }
+        mouseMonitor = nil
     }
 
     private func classmateHeadPosition(seat: (row: Int, column: Int)) -> SCNVector3 {
@@ -573,11 +1020,13 @@ final class ClassroomCoordinator {
         root.addChildNode(box(width: 0.05, height: 2.05, length: 1.2, color: tile, position: SCNVector3(7.3, 1.02, 5.85)))
         root.addChildNode(box(width: 1.2, height: 2.05, length: 0.05, color: tile, position: SCNVector3(6.7, 1.02, 5.25)))
         root.addChildNode(box(width: 1.2, height: 2.05, length: 0.05, color: tile, position: SCNVector3(6.7, 1.02, 6.45)))
-        root.addChildNode(box(width: 0.06, height: 1.75, length: 0.98, color: partition, position: SCNVector3(6.2, 0.9, 5.85)))
+        root.addChildNode(box(width: 0.06, height: 1.75, length: 0.12, color: partition, position: SCNVector3(6.2, 0.9, 5.31)))
+        root.addChildNode(box(width: 0.06, height: 1.75, length: 0.12, color: partition, position: SCNVector3(6.2, 0.9, 6.39)))
+        root.addChildNode(box(width: 0.06, height: 0.18, length: 0.98, color: partition, position: SCNVector3(6.2, 1.72, 5.85)))
         root.addChildNode(box(width: 0.065, height: 0.24, length: 0.88, color: NSColor(calibratedRed: 0.86, green: 0.94, blue: 1.0, alpha: 1), position: SCNVector3(6.14, 1.84, 5.85)))
         root.addChildNode(makeText("洗手间", size: 0.055, color: NSColor(calibratedWhite: 0.05, alpha: 1), position: SCNVector3(6.09, 1.79, 5.58)))
-        root.addChildNode(box(width: 0.018, height: 0.9, length: 0.12, color: NSColor(calibratedWhite: 0.95, alpha: 1), position: SCNVector3(6.1, 0.82, 5.55)))
-        root.addChildNode(box(width: 0.018, height: 0.9, length: 0.12, color: NSColor(calibratedWhite: 0.95, alpha: 1), position: SCNVector3(6.1, 0.82, 6.15)))
+        root.addChildNode(box(width: 0.018, height: 0.9, length: 0.1, color: NSColor(calibratedWhite: 0.95, alpha: 1), position: SCNVector3(6.1, 0.82, 5.42)))
+        root.addChildNode(box(width: 0.018, height: 0.9, length: 0.1, color: NSColor(calibratedWhite: 0.95, alpha: 1), position: SCNVector3(6.1, 0.82, 6.28)))
         root.addChildNode(box(width: 0.5, height: 0.04, length: 0.42, color: porcelain, position: SCNVector3(7.02, 0.66, 5.5)))
         root.addChildNode(box(width: 0.36, height: 0.08, length: 0.28, color: porcelain, position: SCNVector3(7.05, 0.72, 5.5)))
         root.addChildNode(capsule(radius: 0.018, height: 0.18, color: NSColor(calibratedWhite: 0.55, alpha: 1), position: SCNVector3(7.02, 0.86, 5.5), rotation: SCNVector4(1, 0, 0, Float.pi / 2)))
@@ -773,8 +1222,13 @@ final class ClassroomCoordinator {
             for column in 0..<4 {
                 let x = Float(column) * 1.2 - 2.4
                 let z = Float(row) * 1.45 - 2.25
-                root.addChildNode(makeDesk(at: SCNVector3(x, 0, z), isPlayer: row == 2 && column == 1))
-                root.addChildNode(makeChair(at: SCNVector3(x, 0, z + 0.55)))
+                let isPlayerSeat = row == 2 && column == 1
+                root.addChildNode(makeDesk(at: SCNVector3(x, 0, z), isPlayer: isPlayerSeat))
+                let chair = makeChair(at: SCNVector3(x, 0, z + 0.55))
+                if isPlayerSeat {
+                    chair.name = "playerGroundedChair"
+                }
+                root.addChildNode(chair)
             }
         }
         return root
@@ -881,8 +1335,8 @@ final class ClassroomCoordinator {
         let root = SCNNode()
         root.position = position
         let topColor = isPlayer ? NSColor(calibratedRed: 0.74, green: 0.62, blue: 0.46, alpha: 1) : NSColor(calibratedRed: 0.62, green: 0.48, blue: 0.34, alpha: 1)
-        root.addChildNode(box(width: 0.82, height: 0.08, length: 0.55, color: topColor, position: SCNVector3(0, 0.72, 0)))
-        root.addChildNode(box(width: 0.74, height: 0.035, length: 0.06, color: NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.11, alpha: 1), position: SCNVector3(0, 0.63, -0.25)))
+        root.addChildNode(box(width: 0.74, height: 0.08, length: 0.53, color: topColor, position: SCNVector3(0, 0.72, 0)))
+        root.addChildNode(box(width: 0.68, height: 0.035, length: 0.06, color: NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.11, alpha: 1), position: SCNVector3(0, 0.63, -0.24)))
         if isPlayer == false {
             root.addChildNode(makeDeskSupplies(seed: Int((position.x + 4) * 10 + (position.z + 6) * 7)))
         }
@@ -918,6 +1372,12 @@ final class ClassroomCoordinator {
         root.position = position
         root.addChildNode(box(width: 0.52, height: 0.06, length: 0.46, color: NSColor(calibratedRed: 0.28, green: 0.24, blue: 0.22, alpha: 1), position: SCNVector3(0, 0.45, 0)))
         root.addChildNode(box(width: 0.52, height: 0.5, length: 0.06, color: NSColor(calibratedRed: 0.25, green: 0.21, blue: 0.19, alpha: 1), position: SCNVector3(0, 0.75, 0.22)))
+        let legColor = NSColor(calibratedRed: 0.18, green: 0.18, blue: 0.17, alpha: 1)
+        for (index, offset) in [(-0.2, -0.16), (0.2, -0.16), (-0.2, 0.16), (0.2, 0.16)].enumerated() {
+            let leg = box(width: 0.045, height: 0.44, length: 0.045, color: legColor, position: SCNVector3(Float(offset.0), 0.22, Float(offset.1)))
+            leg.name = "chairLeg_\(index)"
+            root.addChildNode(leg)
+        }
         return root
     }
 
@@ -1040,7 +1500,8 @@ final class ClassroomCoordinator {
     }
 
     private func makePlayerDeskProps() -> SCNNode {
-        let root = SCNNode()
+        let root = playerSeatedPropsNode
+        root.name = "playerSeatedFirstPersonProps"
         homeworkSheetNode.addChildNode(box(width: 0.58, height: 0.018, length: 0.48, color: NSColor(calibratedWhite: 0.94, alpha: 1), position: SCNVector3(0, 0, 0)))
         homeworkSheetNode.addChildNode(box(width: 0.02, height: 0.004, length: 0.44, color: NSColor(calibratedRed: 0.76, green: 0.1, blue: 0.12, alpha: 1), position: SCNVector3(-0.25, 0.014, 0)))
         for index in 0..<7 {
@@ -1264,6 +1725,17 @@ final class ClassroomCoordinator {
     }
 
     private func updateDeskState(game: GameManager) {
+        let shouldShowSeatedProps = game.viewMode == .student && game.player.posture == .seated && game.freeRoam.isActive == false
+        playerSeatedPropsNode.isHidden = shouldShowSeatedProps == false
+        guard shouldShowSeatedProps else {
+            rightHandNode.removeAction(forKey: "write_homework")
+            homeworkSheetNode.removeAction(forKey: "paper_focus")
+            leftLegNode.removeAction(forKey: "bladder_fidget")
+            rightLegNode.removeAction(forKey: "bladder_fidget")
+            seatTensionNode.removeAction(forKey: "seat_tension")
+            return
+        }
+
         let progress = max(0.02, min(1.0, game.player.homework / 100))
         homeworkProgressNode.scale = SCNVector3(Float(progress) * 0.46, 1, 1)
         homeworkProgressNode.opacity = game.cameraPose == .desk ? 1.0 : 0.62
@@ -1337,6 +1809,19 @@ final class ClassroomCoordinator {
             rightLegNode.eulerAngles.z = 0
             seatTensionNode.opacity = 0.08
         }
+    }
+
+    var playerSeatedPropsVisible: Bool {
+        playerSeatedPropsNode.isHidden == false
+    }
+
+    var playerGroundedChairVisible: Bool {
+        scene.rootNode.childNode(withName: "playerGroundedChair", recursively: true)?.isHidden == false
+    }
+
+    var playerGroundedChairLegCount: Int {
+        guard let chair = scene.rootNode.childNode(withName: "playerGroundedChair", recursively: true) else { return 0 }
+        return chair.childNodes.filter { $0.name?.hasPrefix("chairLeg_") == true }.count
     }
 
     private func eventVisualIntensity(game: GameManager) -> (blur: Double, vignette: Double, desaturation: Double) {

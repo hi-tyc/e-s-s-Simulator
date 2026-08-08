@@ -36,7 +36,11 @@ final class GameManager: ObservableObject {
     @Published var cameraPose: CameraPose = .forward
     @Published var studentLookYaw: Double = 0
     @Published var studentLookPitch: Double = 0
+    @Published var mouseLookCaptured: Bool = false
+    @Published var mouseLookEnabled: Bool = true
     @Published var freeRoam = StudentFreeRoamState()
+    @Published var isReturningToSeat: Bool = false
+    @Published var returnToSeatStartedAt: Date = .distantPast
     @Published var frontDoorOpen: Bool = false
     @Published var rearDoorOpen: Bool = false
     @Published var playerLockerOpen: Bool = false
@@ -54,6 +58,12 @@ final class GameManager: ObservableObject {
     @Published var triggeredPeriods: Set<StudyPeriod> = []
     @Published var leaveSeatUsedPeriods: Set<StudyPeriod> = []
     @Published var monologues: [InnerMonologue] = []
+    @Published var featuredMonologue: FeaturedMonologue?
+    @Published var activeChapter: StoryChapter = .silentClassroom
+    @Published var chapterOneStep: ChapterOneStep = .observeLinChe
+    @Published var chapterClues: [ChapterClue] = []
+    @Published var hasPresentedChapterOneDecision: Bool = false
+    @Published var chapterOneDecision: String = ""
     @Published var hasTriggeredLoneliness: Bool = false
     @Published var hasTriggeredPhoneNotification: Bool = false
     @Published var hasTriggeredBroadcast: Bool = false
@@ -65,31 +75,156 @@ final class GameManager: ObservableObject {
     @Published var hasTriggeredMemorySuspicion: Bool = false
     @Published var classmateMemory: [Int: ClassmateMemory] = [:]
     @Published var audioAssetStatus: AudioAssetStatus
+    @Published var isPrologueActive = false
+    @Published var prologueState = PrologueState()
+    @Published var prologueBeatElapsed: TimeInterval = 0
+    @Published var prologueLookExplorationElapsed: TimeInterval = 0
+    @Published var prologueActionReady = false
+    @Published var prologueSeatNearby = false
+    @Published var isPrologueTutorialPresented = false
+    @Published var isChapterOneTransitionPresented = false
+    @Published private(set) var prologuePauseReasons: Set<ProloguePauseReason> = []
+    @Published var accessibilityPreferences = AccessibilityPreferences()
+    @Published var isAccessibilityPanelPresented = false
+    @Published var prologuePerformancePhase = 0
+    @Published var isGameGuidePresented = false
+    @Published var menuGuideCountdown = 5
+    @Published var gameGuideExitCountdown = 0
+    @Published private(set) var hasCompletedInitialGameGuide = false
+
+    var prologuePaused: Bool { prologuePauseReasons.isEmpty == false }
 
     let audio = SpatialAudioManager()
+    private let shouldStartAudioEngine = NSClassFromString("XCTestCase") == nil
     private let memoryStoreKey = "LateStudySimulator.ClassmateMemory.v1"
+    private let prologueStoreKey = "LateStudySimulator.Prologue.v1"
+    private let accessibilityStoreKey = "LateStudySimulator.Accessibility.v1"
+    private var prologueTimer: Timer?
+    private var menuGuideTimer: Timer?
+    private var gameGuideExitTimer: Timer?
+    private var prologueDwell: TimeInterval = 0
     private var freeRoamTimer: Timer?
+    private var freeRoamPausedAt: Date?
+    private var returnToSeatTask: Task<Void, Never>?
+    private var pendingSprintHunger: Double = 0
+    private var lastAnomalyMonologueTurn: [String: Int] = [:]
+    private var monologueDismissTask: Task<Void, Never>?
     private let normalFreeRoamPlayerRadius = 0.19
     private let sidewaysFreeRoamPlayerRadius = 0.115
+    static let returnToSeatResetDelay: TimeInterval = 1.08
+    static let returnToSeatTotalDuration: TimeInterval = 1.8
 
     init() {
         audioAssetStatus = audio.assetStatus
         classmateMemory = loadClassmateMemory()
+        loadPrologueProgress()
+    }
+
+    func startExperience(forcePrologue: Bool = false) {
+        if forcePrologue || prologueState.prologueCompleted == false {
+            // Entering from the menu is an authored replay, so always include the
+            // exterior arrival instead of silently resuming inside the building.
+            startPrologue(resume: false)
+        } else {
+            startGame()
+        }
+    }
+
+    var isMenuEntryLocked: Bool { hasCompletedInitialGameGuide == false }
+
+    func beginInitialGameGuideIfNeeded() {
+        guard hasCompletedInitialGameGuide == false,
+              isGameGuidePresented == false,
+              menuGuideTimer == nil else { return }
+        menuGuideCountdown = 5
+        menuGuideTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.advanceMenuGuideCountdown() }
+        }
+    }
+
+    func advanceMenuGuideCountdown() {
+        guard hasCompletedInitialGameGuide == false, isGameGuidePresented == false else { return }
+        menuGuideCountdown = max(0, menuGuideCountdown - 1)
+        if menuGuideCountdown == 0 {
+            menuGuideTimer?.invalidate()
+            menuGuideTimer = nil
+            presentGameGuide(isInitialPresentation: true)
+        }
+    }
+
+    func presentGameGuide(isInitialPresentation: Bool = false) {
+        isGameGuidePresented = true
+        gameGuideExitTimer?.invalidate()
+        gameGuideExitTimer = nil
+        gameGuideExitCountdown = isInitialPresentation && hasCompletedInitialGameGuide == false ? 10 : 0
+        guard gameGuideExitCountdown > 0 else { return }
+        gameGuideExitTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.advanceGameGuideExitCountdown() }
+        }
+    }
+
+    func advanceGameGuideExitCountdown() {
+        gameGuideExitCountdown = max(0, gameGuideExitCountdown - 1)
+        if gameGuideExitCountdown == 0 {
+            gameGuideExitTimer?.invalidate()
+            gameGuideExitTimer = nil
+        }
+    }
+
+    func dismissGameGuide() {
+        guard isGameGuidePresented, gameGuideExitCountdown == 0 else { return }
+        isGameGuidePresented = false
+        hasCompletedInitialGameGuide = true
+    }
+
+    func startPrologue(resume: Bool = false) {
+        startGame()
+        isPrologueActive = true
+        currentTurn = 0
+        chapterClues = []
+        featuredMonologue = nil
+        monologues = []
+        gameState = .playing
+        player.posture = .standing
+        freeRoam = StudentFreeRoamState()
+        prologuePauseReasons = []
+        isPrologueTutorialPresented = false
+        isChapterOneTransitionPresented = false
+        isAccessibilityPanelPresented = false
+        if resume == false || prologueState.prologueCompleted {
+            prologueState = PrologueState()
+        }
+        beginPrologueBeat(prologueState.currentBeat)
+        startPrologueTimer()
     }
 
     func startGame() {
+        stopPrologueTimer()
+        isPrologueActive = false
+        prologuePauseReasons = []
         currentTurn = 1
         maxTurns = settings.maxTurns
+        activeChapter = .silentClassroom
+        chapterOneStep = .observeLinChe
         currentPhase = .observation
-        activeRole = selectedRole
+        selectedRole = .regularStudent
+        activeRole = .regularStudent
         player = PlayerState()
         configurePlayerForSelectedRole()
         teacher = makeTeacherState(for: activeRole)
         cameraPose = .forward
         studentLookYaw = 0
         studentLookPitch = 0
+        mouseLookEnabled = true
+        mouseLookCaptured = false
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        returnToSeatStartedAt = .distantPast
+        pendingSprintHunger = 0
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
+        freeRoamPausedAt = nil
         freeRoam = StudentFreeRoamState()
         frontDoorOpen = false
         rearDoorOpen = false
@@ -106,6 +241,13 @@ final class GameManager: ObservableObject {
         triggeredPeriods = []
         leaveSeatUsedPeriods = []
         monologues = []
+        featuredMonologue = nil
+        monologueDismissTask?.cancel()
+        chapterClues = []
+        chapterOneStep = .observeLinChe
+        hasPresentedChapterOneDecision = false
+        chapterOneDecision = ""
+        lastAnomalyMonologueTurn = [:]
         hasTriggeredLoneliness = false
         hasTriggeredPhoneNotification = false
         hasTriggeredBroadcast = false
@@ -117,15 +259,24 @@ final class GameManager: ObservableObject {
         hasTriggeredMemorySuspicion = false
         gameState = .playing
         let memoryText = classmateMemory.isEmpty ? "" : " 有 \(classmateMemory.count) 个同学还带着上一晚的关系余波。"
-        message = "18:30，晚自习开始。角色：\(activeRole.rawValue)。制度参数：\(settings.description)。\(roleOpeningLine)\(memoryText)"
-        addMonologue(roleOpeningMonologue, intensity: activeRole.isTeacher ? 0.36 : 0.42)
-        audio.start()
+        message = chapterOpeningMessage(memoryText: memoryText)
+        addMonologue(chapterOpeningMonologue, intensity: 0.56)
+        if shouldStartAudioEngine { audio.start() }
         updatePerception()
     }
 
     func returnToMenuForNewGame() {
+        stopPrologueTimer()
+        isPrologueActive = false
+        prologuePauseReasons = []
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        returnToSeatStartedAt = .distantPast
+        pendingSprintHunger = 0
+        freeRoamPausedAt = nil
         freeRoam = StudentFreeRoamState()
         audio.stop()
         gameState = .menu
@@ -134,13 +285,368 @@ final class GameManager: ObservableObject {
         cameraPose = .forward
         studentLookYaw = 0
         studentLookPitch = 0
+        mouseLookEnabled = true
+        mouseLookCaptured = false
         viewMode = .student
         eventLog = []
         audioCues = []
         monologues = []
+        featuredMonologue = nil
+        monologueDismissTask?.cancel()
+        chapterClues = []
+        hasPresentedChapterOneDecision = false
+        chapterOneDecision = ""
+        lastAnomalyMonologueTurn = [:]
         replay = []
         selectedReplayIndex = 0
         message = "请选择角色和制度参数，开始新的一晚。"
+    }
+
+    var prologueCurrentBeat: PrologueBeatID { prologueState.currentBeat }
+
+    var prologueAutoAdvanceSecondsRemaining: Int? {
+        guard let duration = prologueCurrentBeat.autoAdvanceDuration,
+              prologueCurrentBeat != .gateArrival else { return nil }
+        return max(0, Int(ceil(duration - prologueBeatElapsed)))
+    }
+
+    var canCompleteCurrentPrologueEarly: Bool {
+        isPrologueActive && isPrologueTutorialPresented == false && prologuePaused == false
+            && prologueCurrentBeat != .lookDownHall
+            && prologueCurrentBeat.autoAdvanceDuration != nil
+            && prologueCurrentBeat != .gateArrival
+            && prologueActionReady
+    }
+
+    private func startPrologueTimer() {
+        prologueTimer?.invalidate()
+        prologueTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tickPrologue(delta: 0.1) }
+        }
+    }
+
+    private func stopPrologueTimer() {
+        prologueTimer?.invalidate()
+        prologueTimer = nil
+        prologueDwell = 0
+    }
+
+    func tickPrologue(delta: TimeInterval) {
+        guard isPrologueActive, prologuePaused == false, gameState == .playing else { return }
+        prologueBeatElapsed += delta
+        let beat = prologueState.currentBeat
+        if beat == .studyHallRhythm { updateStudyHallPerformance() }
+        if let duration = beat.autoAdvanceDuration, prologueBeatElapsed >= duration {
+            let source: PrologueCompletionSource = (beat == .gateArrival || beat == .studyHallRhythm || beat == .bellBeforeClass)
+                ? .performance
+                : .fallback
+            completePrologueBeat(beat, source: source)
+        }
+    }
+
+    private func updateStudyHallPerformance() {
+        let nextPhase: Int
+        switch prologueBeatElapsed {
+        case ..<9: nextPhase = 0
+        case ..<18: nextPhase = 1
+        case ..<27: nextPhase = 2
+        case ..<36: nextPhase = 3
+        default: nextPhase = 4
+        }
+        guard nextPhase != prologuePerformancePhase else { return }
+        prologuePerformancePhase = nextPhase
+        switch nextPhase {
+        case 1:
+            teacher.positionIndex = 0
+            message = "方老师把手机扣在讲台边，确认最后一排的座位。她没有说话，只在名单上停了一下。"
+            addAudioCue(.paper, direction: "讲台前方", intensity: 0.32, note: "名单翻过一页。")
+        case 2:
+            frontDoorOpen = false
+            message = "周予安核对完座位，把门轻轻带上。许栀弯腰捡起一支笔，递回旁边。"
+            addAudioCue(.knock, direction: "前门", intensity: 0.34, note: "门轴声和一句很轻的“给你”。")
+        case 3:
+            message = "有人写题，有人趴了一下又坐直。耳机被收进抽屉，咳嗽声压得很低。"
+            addAudioCue(.chair, direction: "教室四周", intensity: 0.38, note: "椅子、抽屉和笔尖构成晚自习开始前的声音。")
+        case 4:
+            message = "苏念从左到右扫过教室，没有在任何人身上停太久。林澈在左边坐下，把书翻到其中一页。"
+            addAudioCue(.paper, direction: "左侧近处", intensity: 0.3, note: "纸张摩擦后，环境声重新占满教室。")
+        default:
+            break
+        }
+    }
+
+    func updatePrologueDwell(delta: TimeInterval) {
+        guard isPrologueActive, prologuePaused == false else { return }
+        let beat = prologueState.currentBeat
+        let matches = beat == .noticeLinChe && (cameraPose == .left || studentLookYaw > 0.42)
+        prologueDwell = matches ? prologueDwell + delta : 0
+        if matches && prologueDwell >= 1.0 {
+            prologueActionReady = true
+            message = "你已经认真看见了林澈的状态。按 C 可以提前结束这一步。"
+        }
+    }
+
+    func updatePrologueLookExploration(isMoving: Bool, delta: TimeInterval) {
+        guard isPrologueActive, prologuePaused == false,
+              prologueCurrentBeat == .lookDownHall, isMoving else { return }
+        prologueLookExplorationElapsed = min(5, prologueLookExplorationElapsed + delta)
+        if prologueLookExplorationElapsed >= 5 {
+            completePrologueBeat(.lookDownHall, source: .player)
+        }
+    }
+
+    func completeCurrentPrologueEarly() {
+        guard canCompleteCurrentPrologueEarly else { return }
+        completePrologueBeat(prologueCurrentBeat, source: .fallback)
+    }
+
+    func confirmPrologueInteraction() {
+        guard isPrologueActive, prologuePaused == false else { return }
+        switch prologueState.currentBeat {
+        case .placeWater:
+            prologueActionReady = true
+            message = "水杯已经放在手边。按 C 可以提前结束这一步，也可以继续留在这里。"
+        case .accessibility:
+            acknowledgeAccessibilityTutorial(openSettings: false)
+        case .settleBreath:
+            prologueActionReady = true
+            message = "你完成了一次自我调整。按 C 可以提前结束这一步。"
+        case .returnToSeat:
+            confirmPrologueSeat()
+        default:
+            break
+        }
+    }
+
+    @discardableResult
+    func confirmPrologueSeat() -> Bool {
+        guard isPrologueActive, prologuePaused == false,
+              prologueCurrentBeat == .returnToSeat, freeRoam.isActive else { return false }
+        guard hypot(freeRoam.positionX - (-0.6), freeRoam.positionZ - 1.65) <= 0.72 else {
+            message = "还没有到自己的座位附近。"
+            return false
+        }
+        freeRoam = StudentFreeRoamState()
+        player.posture = .seated
+        studentLookYaw = 0
+        studentLookPitch = 0
+        cameraPose = .forward
+        prologueActionReady = true
+        message = "你已经坐回自己的位置。按 C 可以提前结束这一步。"
+        return true
+    }
+
+    func acknowledgeSettleBreathWithoutAction() {
+        guard isPrologueActive, prologueState.currentBeat == .settleBreath else { return }
+        prologueActionReady = true
+        message = "你决定先安静地坐一会儿。按 C 可以提前结束这一步。"
+    }
+
+    func presentCurrentPrologueTutorial() {
+        guard isPrologueActive, prologueCurrentBeat.tutorialStep != nil else { return }
+        isPrologueTutorialPresented = true
+        prologuePauseReasons.insert(.tutorial)
+    }
+
+    func dismissCurrentPrologueTutorial() {
+        guard isPrologueTutorialPresented else { return }
+        isPrologueTutorialPresented = false
+        prologuePauseReasons.remove(.tutorial)
+    }
+
+    func toggleCurrentPrologueTutorial() {
+        guard isPrologueActive, prologueCurrentBeat.tutorialStep != nil else { return }
+        if isPrologueTutorialPresented == false {
+            presentCurrentPrologueTutorial()
+        }
+    }
+
+    func acknowledgeAccessibilityTutorial(openSettings: Bool) {
+        guard isPrologueActive, prologueState.currentBeat == .accessibility else { return }
+        if openSettings {
+            isAccessibilityPanelPresented = true
+            prologuePauseReasons.insert(.settings)
+        } else {
+            prologueState.accessibilityTutorialAcknowledged = true
+            prologueActionReady = true
+            message = "你已经确认了辅助设置。按 C 可以提前结束这一步。"
+        }
+    }
+
+    func closeAccessibilityPanel() {
+        isAccessibilityPanelPresented = false
+        prologuePauseReasons.remove(.settings)
+        saveAccessibilityPreferences()
+        applyAccessibilityPreferences()
+        if isPrologueActive, prologueState.currentBeat == .accessibility {
+            prologueState.accessibilityTutorialAcknowledged = true
+            prologueActionReady = true
+            message = "辅助设置已确认。按 C 可以提前结束这一步。"
+        }
+    }
+
+    func setProloguePaused(_ paused: Bool) {
+        guard isPrologueActive else { return }
+        if paused { prologuePauseReasons.insert(.manual) }
+        else { prologuePauseReasons.remove(.manual) }
+    }
+
+    func setApplicationActive(_ active: Bool) {
+        guard isPrologueActive else { return }
+        if active { prologuePauseReasons.remove(.appInactive) }
+        else { prologuePauseReasons.insert(.appInactive) }
+    }
+
+    func completePrologueBeat(_ beat: PrologueBeatID, source: PrologueCompletionSource) {
+        guard isPrologueActive, prologueState.currentBeat == beat,
+              prologueState.completedBeats.contains(beat) == false else { return }
+        prologueState.completedBeats.insert(beat)
+        switch beat {
+        case .gateArrival:
+            prologueState.openingViewed = true
+        case .lookDownHall:
+            prologueState.lookTutorialCompleted = source == .player
+        case .returnToSeat:
+            prologueState.movementTutorialCompleted = source == .player
+            freeRoam = StudentFreeRoamState()
+            player.posture = .seated
+        case .placeWater:
+            prologueState.interactionTutorialCompleted = source == .player
+        case .accessibility:
+            prologueState.accessibilityTutorialAcknowledged = source == .player
+        default:
+            break
+        }
+
+        guard let index = PrologueBeatID.allCases.firstIndex(of: beat),
+              index + 1 < PrologueBeatID.allCases.count else {
+            finishPrologue()
+            return
+        }
+        let next = PrologueBeatID.allCases[index + 1]
+        prologueState.currentBeat = next
+        savePrologueProgress()
+        beginPrologueBeat(next)
+    }
+
+    private func beginPrologueBeat(_ beat: PrologueBeatID) {
+        prologueState.currentBeat = beat
+        prologueBeatElapsed = 0
+        prologueLookExplorationElapsed = 0
+        prologueActionReady = false
+        prologueSeatNearby = false
+        prologueDwell = 0
+        prologuePerformancePhase = 0
+        cameraPose = .forward
+        studentLookYaw = 0
+        studentLookPitch = 0
+        message = prologueMessage(for: beat)
+        isPrologueTutorialPresented = false
+        prologuePauseReasons.remove(.tutorial)
+        switch beat {
+        case .lookDownHall:
+            // Step one teaches capture explicitly, so confirmation leaves the
+            // cursor released until the player presses the physical ~ key.
+            mouseLookEnabled = false
+        case .returnToSeat:
+            mouseLookEnabled = true
+            let now = Date()
+            freeRoam = StudentFreeRoamState(isActive: true, positionX: 3.25, positionZ: 1.65, yaw: .pi / 2, pitch: 0, startedAt: now, endsAt: .distantFuture, hasExitedClassroom: false, isSideways: false, isSprinting: false, frontDoorOpen: true, rearDoorOpen: false)
+            player.posture = .standing
+        case .placeWater, .studyHallRhythm, .noticeLinChe, .settleBreath, .accessibility, .bellBeforeClass:
+            freeRoam = StudentFreeRoamState()
+            player.posture = .seated
+        default:
+            break
+        }
+        if beat == .studyHallRhythm || beat == .bellBeforeClass {
+            prologueActionReady = true
+        }
+        addPrologueAudio(for: beat)
+        if beat.tutorialStep != nil {
+            presentCurrentPrologueTutorial()
+        }
+    }
+
+    private func finishPrologue() {
+        stopPrologueTimer()
+        prologueState.prologueCompleted = true
+        prologueState.completedBeats.insert(.bellBeforeClass)
+        savePrologueProgress()
+        startGame()
+        message = "预备铃的余音还在。晚自习开始了。"
+        isChapterOneTransitionPresented = true
+    }
+
+    func enterChapterOneAfterPrologue() {
+        isChapterOneTransitionPresented = false
+    }
+
+    func restartPrologueTutorial() {
+        startPrologue(resume: false)
+        // Re-enter at step 1 without replaying the seven-second exterior arrival.
+        completePrologueBeat(.gateArrival, source: .performance)
+    }
+
+    private func prologueMessage(for beat: PrologueBeatID) -> String {
+        switch beat {
+        case .gateArrival: return "晚自习开始前，楼里总有一小段时间。大家在找座位，也在把白天没收好的东西先藏起来。"
+        case .lookDownHall: return "走廊尽头，方老师正在和班长确认值日安排。"
+        case .returnToSeat: return "教室门已经打开。先回到第三排。"
+        case .placeWater: return "水放在手边。等会儿如果脑子很乱，至少不用再找它。"
+        case .studyHallRhythm: return "门轴、翻页和椅子声一点点退下去，教室正在变得安静。"
+        case .noticeLinChe: return "有时候你先看见的，只是一个人比平常安静。"
+        case .settleBreath: return "自我照顾不是额外任务。你也在这间教室里。"
+        case .accessibility: return "你可以随时暂停，调整字幕、声音、动态效果和输入方式。"
+        case .bellBeforeClass: return "铃响以后，大家都会开始做自己的事。也许我也是。"
+        }
+    }
+
+    private func addPrologueAudio(for beat: PrologueBeatID) {
+        switch beat {
+        case .gateArrival: addAudioCue(.footstep, direction: "楼道远处", intensity: 0.38, note: "学生进入教学楼的脚步声。")
+        case .lookDownHall: addAudioCue(.whisper, direction: "走廊尽头", intensity: 0.3, note: "老师与班长在确认值日安排。")
+        case .returnToSeat: addAudioCue(.footstep, direction: "第三排", intensity: 0.38, note: "回到座位的短距离脚步。")
+        case .placeWater: addAudioCue(.paper, direction: "桌面", intensity: 0.24, note: "水杯轻轻碰到桌面。")
+        case .studyHallRhythm: addAudioCue(.chair, direction: "教室四周", intensity: 0.4, note: "同学们陆续坐好。")
+        case .noticeLinChe: addAudioCue(.paper, direction: "左侧近处", intensity: 0.3, note: "林澈把书翻到其中一页。")
+        case .settleBreath: addAudioCue(.heartbeat, direction: "颅内", intensity: 0.22, note: "呼吸慢慢稳定下来。")
+        case .accessibility: break
+        case .bellBeforeClass: addAudioCue(.broadcast, direction: "走廊远处", intensity: 0.58, note: "预备铃从走廊传来。")
+        }
+    }
+
+    private func savePrologueProgress() {
+        guard shouldStartAudioEngine else { return }
+        guard let data = try? JSONEncoder().encode(prologueState) else { return }
+        UserDefaults.standard.set(data, forKey: prologueStoreKey)
+    }
+
+    private func saveAccessibilityPreferences() {
+        guard shouldStartAudioEngine else { return }
+        guard let data = try? JSONEncoder().encode(accessibilityPreferences) else { return }
+        UserDefaults.standard.set(data, forKey: accessibilityStoreKey)
+    }
+
+    func applyAccessibilityPreferences() {
+        audio.setMixVolumes(
+            dialogue: accessibilityPreferences.dialogueVolume,
+            ambience: accessibilityPreferences.ambienceVolume,
+            cues: accessibilityPreferences.cueVolume
+        )
+        saveAccessibilityPreferences()
+    }
+
+    private func loadPrologueProgress() {
+        if let data = UserDefaults.standard.data(forKey: prologueStoreKey),
+           let saved = try? JSONDecoder().decode(PrologueState.self, from: data) {
+            prologueState = saved
+        }
+        if let data = UserDefaults.standard.data(forKey: accessibilityStoreKey),
+           let saved = try? JSONDecoder().decode(AccessibilityPreferences.self, from: data) {
+            accessibilityPreferences = saved
+            applyAccessibilityPreferences()
+        }
     }
 
     private func configurePlayerForSelectedRole() {
@@ -225,6 +731,44 @@ final class GameManager: ObservableObject {
         case .counselingPatrolTeacher:
             return "我不能只等学生崩溃后再出现，真正难的是提前看见。"
         }
+    }
+
+    private func chapterOpeningMessage(memoryText: String) -> String {
+        switch activeChapter {
+        case .silentClassroom:
+            return "18:30，\(activeChapter.rawValue)开始。你坐在第三排，班长还在收作业，林澈替人讲完最后一道题，后排椅子轻轻擦过地面。\(roleOpeningLine)\(memoryText)"
+        }
+    }
+
+    private var chapterOpeningMonologue: String {
+        switch activeChapter {
+        case .silentClassroom:
+            if activeRole.isTeacher {
+                return "安静只是表面。我今晚要判断，哪些沉默是真正在学习，哪些沉默是在求救。"
+            }
+            return "我只能看一个方向。错过什么不是失败，但看见了就不能当作没发生。"
+        }
+    }
+
+    var chapterObjectiveText: String {
+        activeChapter.objective
+    }
+
+    var chapterProgressText: String {
+        chapterOneStep.guidance
+    }
+
+    var chapterCurrentObjective: String {
+        chapterOneStep.objective
+    }
+
+    var chapterOneAvailableActions: [PlayerAction] {
+        guard chapterOneStep != .completed else { return [] }
+        var actions = PlayerAction.allCases.filter { $0 != .leaveSeat }
+        if chapterOneStep == .followLinChe {
+            actions.append(.leaveSeat)
+        }
+        return actions
     }
 
     func restartWithCurrentSettings() {
@@ -354,9 +898,13 @@ final class GameManager: ObservableObject {
 
     func setPose(_ pose: CameraPose) {
         guard case .playing = gameState else { return }
+        if isPrologueActive && prologueState.currentBeat.allowsLook == false { return }
         guard activeRole.isTeacher == false, freeRoam.isActive == false else { return }
         let previousPose = cameraPose
         cameraPose = pose
+        if isPrologueActive {
+            return
+        }
 
         switch pose {
         case .board:
@@ -397,37 +945,51 @@ final class GameManager: ObservableObject {
 
         applyTurnStrain(from: previousPose, to: pose)
         clampPlayer()
+        maybeAddAnomalyMonologue()
         updatePerception()
     }
 
     func rotateStudentView(deltaX: Double, deltaY: Double) {
-        guard case .playing = gameState, activeRole.isTeacher == false else { return }
+        guard case .playing = gameState, activeRole.isTeacher == false, isReturningToSeat == false else { return }
+        if isPrologueActive && prologuePaused { return }
+        if isPrologueActive && prologueState.currentBeat.allowsLook == false { return }
         let previousPose = cameraPose
         let sensitivity = 0.006
-        studentLookYaw = normalizedAngle(studentLookYaw - deltaX * sensitivity)
-        studentLookPitch = (studentLookPitch - deltaY * sensitivity).clamped(to: -0.72...0.48)
+        let nextYaw = normalizedAngle(studentLookYaw - deltaX * sensitivity)
+        let nextPitch = (studentLookPitch - deltaY * sensitivity).clamped(to: -0.72...0.48)
+        studentLookYaw = nextYaw
+        studentLookPitch = nextPitch
         if freeRoam.isActive {
-            freeRoam.yaw = studentLookYaw
-            freeRoam.pitch = studentLookPitch
+            var nextFreeRoam = freeRoam
+            nextFreeRoam.yaw = nextYaw
+            nextFreeRoam.pitch = nextPitch
+            freeRoam = nextFreeRoam
         }
-        updateCameraPoseFromLook()
+        let nextPose = cameraPoseFromLook(yaw: nextYaw, pitch: nextPitch)
+        guard nextPose != previousPose else { return }
+        cameraPose = nextPose
+        if isPrologueActive {
+            return
+        }
         applyRearLookRiskIfNeeded(previousPose: previousPose)
-        updatePerception()
+        if freeRoam.isActive == false {
+            updatePerception()
+        }
     }
 
-    private func updateCameraPoseFromLook() {
-        if studentLookPitch < -0.38 {
-            cameraPose = .desk
-        } else if studentLookPitch > 0.25 {
-            cameraPose = .board
-        } else if abs(studentLookYaw) > 2.35 {
-            cameraPose = .rear
-        } else if studentLookYaw > 0.42 {
-            cameraPose = .left
-        } else if studentLookYaw < -0.42 {
-            cameraPose = .right
+    private func cameraPoseFromLook(yaw: Double, pitch: Double) -> CameraPose {
+        if abs(yaw) > 2.35 {
+            return .rear
+        } else if pitch < -0.38 {
+            return .desk
+        } else if pitch > 0.25 {
+            return .board
+        } else if yaw > 0.42 {
+            return .left
+        } else if yaw < -0.42 {
+            return .right
         } else {
-            cameraPose = .forward
+            return .forward
         }
     }
 
@@ -446,6 +1008,20 @@ final class GameManager: ObservableObject {
         clampPlayer()
     }
 
+    func setMouseLookEnabled(_ enabled: Bool) {
+        guard activeRole.isTeacher == false else { return }
+        mouseLookEnabled = enabled
+        mouseLookCaptured = false
+    }
+
+    func recenterStudentView() {
+        guard case .playing = gameState, activeRole.isTeacher == false, freeRoam.isActive == false, isReturningToSeat == false else { return }
+        studentLookYaw = 0
+        studentLookPitch = 0
+        cameraPose = .forward
+        updatePerception()
+    }
+
     private func normalizedAngle(_ angle: Double) -> Double {
         var value = angle
         while value > .pi { value -= .pi * 2 }
@@ -456,6 +1032,12 @@ final class GameManager: ObservableObject {
     private func beginStudentFreeRoam(duration: TimeInterval = 60, openingMessage: String? = nil) {
         guard activeRole.isTeacher == false else { return }
         freeRoamTimer?.invalidate()
+        freeRoamPausedAt = nil
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        returnToSeatStartedAt = .distantPast
+        pendingSprintHunger = 0
         let now = Date()
         studentLookYaw = 0
         studentLookPitch = 0
@@ -469,12 +1051,13 @@ final class GameManager: ObservableObject {
             endsAt: now.addingTimeInterval(duration),
             hasExitedClassroom: false,
             isSideways: false,
+            isSprinting: false,
             frontDoorOpen: frontDoorOpen,
             rearDoorOpen: rearDoorOpen
         )
         player.posture = .standing
         gameState = .playing
-        message = openingMessage ?? "老师点头同意。你获得 \(Int(duration)) 秒离座活动时间，可以按住画面拖动调整方向，按住空格朝当前方向往前走；靠近前后门时可以开门或关门。"
+        message = openingMessage ?? "老师点头同意。你获得 \(Int(duration)) 秒离座活动时间，移动鼠标调整方向，使用 WASD 行走；靠近前后门时可以开门或关门。"
         addAudioCue(.chair, direction: "座位到过道", intensity: 0.56, note: "获批离座后，椅子声从违规风险变成了被允许的移动声。")
         freeRoamTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -484,25 +1067,46 @@ final class GameManager: ObservableObject {
     }
 
     func moveStudentFreeRoam(forward: Double, strafe: Double, deltaTime: Double) {
-        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false, isReturningToSeat == false else { return }
+        if isPrologueActive && prologuePaused { return }
+        if isPrologueActive && prologueState.currentBeat.allowsMovement == false { return }
         let baseSpeed = freeRoam.hasExitedClassroom ? 1.7 : 1.45
-        let speed = freeRoam.isSideways ? baseSpeed * 0.58 : baseSpeed
+        let postureSpeed = freeRoam.isSideways ? baseSpeed * 0.58 : baseSpeed
+        let speed = freeRoam.isSprinting ? postureSpeed * 1.7 : postureSpeed
         let yaw = freeRoam.yaw
         let distance = speed * deltaTime
+        let inputLength = hypot(forward, strafe)
+        let normalizedForward = inputLength > 1 ? forward / inputLength : forward
+        let normalizedStrafe = inputLength > 1 ? strafe / inputLength : strafe
         let forwardX = -sin(yaw)
         let forwardZ = -cos(yaw)
         let rightX = cos(yaw)
         let rightZ = -sin(yaw)
-        let nextX = freeRoam.positionX + (forwardX * forward + rightX * strafe) * distance
-        let nextZ = freeRoam.positionZ + (forwardZ * forward + rightZ * strafe) * distance
+        let nextX = freeRoam.positionX + (forwardX * normalizedForward + rightX * normalizedStrafe) * distance
+        let nextZ = freeRoam.positionZ + (forwardZ * normalizedForward + rightZ * normalizedStrafe) * distance
         let resolved = resolvedFreeRoamPosition(fromX: freeRoam.positionX, fromZ: freeRoam.positionZ, toX: nextX, toZ: nextZ)
-        freeRoam.positionX = resolved.x
-        freeRoam.positionZ = resolved.z
+        let actualDistance = hypot(resolved.x - freeRoam.positionX, resolved.z - freeRoam.positionZ)
+        var nextFreeRoam = freeRoam
+        nextFreeRoam.positionX = resolved.x
+        nextFreeRoam.positionZ = resolved.z
         if resolved.x > 4.08 {
-            freeRoam.hasExitedClassroom = true
+            nextFreeRoam.hasExitedClassroom = true
             player.stress = max(0, player.stress - 0.05)
         }
-        objectWillChange.send()
+        freeRoam = nextFreeRoam
+        if isPrologueActive, prologueState.currentBeat == .returnToSeat {
+            let wasNearby = prologueSeatNearby
+            prologueSeatNearby = hypot(nextFreeRoam.positionX - (-0.6), nextFreeRoam.positionZ - 1.65) <= 0.72
+            if prologueSeatNearby && wasNearby == false {
+                message = "你已经靠近自己的座位。按 E 入座。"
+            }
+        }
+        if nextFreeRoam.isSprinting && actualDistance > 0 {
+            pendingSprintHunger += actualDistance * 0.18
+            if pendingSprintHunger >= 0.25 {
+                flushSprintHunger()
+            }
+        }
     }
 
     var nearbyStudentDoor: StudentDoor? {
@@ -525,8 +1129,9 @@ final class GameManager: ObservableObject {
         }
     }
 
-    func toggleNearbyStudentDoor() {
-        guard let door = nearbyStudentDoor else { return }
+    @discardableResult
+    func interactWithNearbyDoor() -> Bool {
+        guard let door = nearbyStudentDoor else { return false }
         let willOpen = isStudentDoorOpen(door) == false
         let didPushPlayer = willOpen ? false : pushPlayerOutOfDoorwayBeforeClosing(door)
         switch door {
@@ -551,6 +1156,7 @@ final class GameManager: ObservableObject {
         }
         clampPlayer()
         objectWillChange.send()
+        return true
     }
 
     var isNearPlayerLocker: Bool {
@@ -583,7 +1189,8 @@ final class GameManager: ObservableObject {
         guard isNearWaterDispenser else { return }
         player.waterCup = 100
         player.exposure += currentPeriod.isBreak ? 0.2 : 1.2
-        message = "你在饮水机旁把水杯接满。杯里的水回到 100，之后可以在座位上继续喝。"
+        spendFreeRoamSeconds(10)
+        message = "你在饮水机旁把水杯接满，消耗 10 秒。杯里的水回到 100，之后可以在座位上继续喝。"
         addAudioCue(.knock, direction: "走廊饮水机", intensity: 0.2, note: "水流声很轻，课间会被走廊声盖住。")
         clampPlayer()
         objectWillChange.send()
@@ -591,9 +1198,9 @@ final class GameManager: ObservableObject {
 
     var isNearRestroom: Bool {
         guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return false }
-        let dx = freeRoam.positionX - 6.12
-        let dz = freeRoam.positionZ - 5.85
-        return sqrt(dx * dx + dz * dz) <= 1.05
+        let dx = freeRoam.positionX - 7.02
+        let dz = freeRoam.positionZ - 6.12
+        return sqrt(dx * dx + dz * dz) <= 0.48
     }
 
     func useRestroom() {
@@ -601,28 +1208,30 @@ final class GameManager: ObservableObject {
         player.bladder = 0
         player.stress = max(0, player.stress - 8)
         player.psychicEnergy = min(100, player.psychicEnergy + 4)
-        let remaining = max(0, freeRoam.endsAt.timeIntervalSinceNow - 10)
-        freeRoam.endsAt = Date().addingTimeInterval(remaining)
+        spendFreeRoamSeconds(10)
         freeRoam.hasExitedClassroom = true
-        message = "你进入洗手间，过程消耗 10 秒。如厕需求归零，身体终于不用继续和注意力抢位置。"
+        message = "你进入洗手间并靠近马桶后才完成如厕，过程消耗 10 秒。如厕需求归零，身体终于不用继续和注意力抢位置。"
         addAudioCue(.footstep, direction: "洗手间门口", intensity: 0.24, note: "洗手间里的脚步被墙面削弱，离开教室后的声音边界变远。")
         addMonologue("不是我矫情，是身体真的需要被允许处理。", intensity: 0.42)
         clampPlayer()
         objectWillChange.send()
     }
 
+    private func spendFreeRoamSeconds(_ seconds: TimeInterval) {
+        let remaining = max(0, freeRoam.endsAt.timeIntervalSinceNow - seconds)
+        freeRoam.endsAt = Date().addingTimeInterval(remaining)
+    }
+
     private func pushPlayerOutOfDoorwayBeforeClosing(_ door: StudentDoor) -> Bool {
-        let doorHalfDepth = 0.48
-        let doorHalfWidth = 0.14
         let radius = currentFreeRoamPlayerRadius
-        let overlapsDoorDepth = abs(freeRoam.positionZ - door.centerZ) <= doorHalfDepth + radius
-        let overlapsDoorWidth = abs(freeRoam.positionX - door.centerX) <= doorHalfWidth + radius
+        let overlapsDoorDepth = abs(freeRoam.positionZ - door.centerZ) <= 0.5 + radius
+        let overlapsDoorWidth = freeRoam.positionX >= 3.9 - radius && freeRoam.positionX <= 4.52 + radius
         guard overlapsDoorDepth && overlapsDoorWidth else { return false }
 
-        let pushToCorridor = freeRoam.positionX >= door.centerX
+        let pushToCorridor = freeRoam.positionX >= 4.18
         let clearX = pushToCorridor
-            ? door.centerX + doorHalfWidth + radius + 0.04
-            : door.centerX - doorHalfWidth - radius - 0.15
+            ? 4.52 + radius + 0.04
+            : 3.9 - radius - 0.04
         let clampedZ = freeRoam.positionZ.clamped(to: (door.centerZ - 0.34)...(door.centerZ + 0.34))
         freeRoam.positionX = clearX
         freeRoam.positionZ = clampedZ
@@ -658,7 +1267,8 @@ final class GameManager: ObservableObject {
     }
 
     func setFreeRoamSideways(_ isSideways: Bool) {
-        guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard isReturningToSeat == false || isSideways == false else { return }
         guard freeRoam.isSideways != isSideways else { return }
         freeRoam.isSideways = isSideways
         if isSideways {
@@ -670,12 +1280,40 @@ final class GameManager: ObservableObject {
         clampPlayer()
     }
 
+    func setFreeRoamSprinting(_ isSprinting: Bool) {
+        guard freeRoam.isActive, activeRole.isTeacher == false else { return }
+        guard isReturningToSeat == false || isSprinting == false else { return }
+        guard freeRoam.isSprinting != isSprinting else { return }
+        freeRoam.isSprinting = isSprinting
+        if isSprinting {
+            message = "你加快脚步开始疾跑。移动更快，但身体会更快感到饥饿。"
+        } else {
+            flushSprintHunger()
+            message = "你放慢脚步，恢复普通行走速度。"
+        }
+    }
+
+    func clearFreeRoamMovementModifiers() {
+        guard freeRoam.isActive else { return }
+        if freeRoam.isSprinting {
+            flushSprintHunger()
+        }
+        freeRoam.isSprinting = false
+        freeRoam.isSideways = false
+    }
+
+    private func flushSprintHunger() {
+        guard pendingSprintHunger > 0 else { return }
+        player.hunger = min(100, player.hunger + pendingSprintHunger)
+        pendingSprintHunger = 0
+    }
+
     private var freeRoamWalkableRegions: [FreeRoamRect] {
         [
             FreeRoamRect(minX: -3.55, maxX: 3.72, minZ: -5.55, maxZ: 5.55),
             FreeRoamRect(minX: 3.35, maxX: 6.22, minZ: -11.35, maxZ: 8.18),
             FreeRoamRect(minX: 2.22, maxX: 4.02, minZ: -10.2, maxZ: -8.5),
-            FreeRoamRect(minX: 6.0, maxX: 7.16, minZ: 5.35, maxZ: 6.38)
+            FreeRoamRect(minX: 5.72, maxX: 7.2, minZ: 5.32, maxZ: 6.38)
         ]
     }
 
@@ -687,7 +1325,7 @@ final class GameManager: ObservableObject {
                 let x = Double(column) * 1.2 - 2.4
                 let deskZ = Double(row) * 1.45 - 2.25
                 let chairZ = deskZ + 0.55
-                obstacles.append(expandedObstacle(centerX: x, centerZ: deskZ, width: 0.78, length: 0.52))
+                obstacles.append(expandedObstacle(centerX: x, centerZ: deskZ, width: 0.70, length: 0.50))
                 obstacles.append(expandedObstacle(centerX: x, centerZ: chairZ, width: 0.48, length: 0.42))
             }
         }
@@ -701,12 +1339,8 @@ final class GameManager: ObservableObject {
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 0.85, width: 0.16, length: 5.4))
         obstacles.append(expandedObstacle(centerX: 4.0, centerZ: 5.61, width: 0.16, length: 0.8))
 
-        if frontDoorOpen == false {
-            obstacles.append(expandedObstacle(centerX: StudentDoor.front.centerX, centerZ: StudentDoor.front.centerZ, width: 0.28, length: 0.96))
-        }
-        if rearDoorOpen == false {
-            obstacles.append(expandedObstacle(centerX: StudentDoor.rear.centerX, centerZ: StudentDoor.rear.centerZ, width: 0.28, length: 0.96))
-        }
+        obstacles.append(contentsOf: doorLeafObstacles(for: .front))
+        obstacles.append(contentsOf: doorLeafObstacles(for: .rear))
 
         obstacles.append(expandedObstacle(centerX: 3.88, centerZ: -7.25, width: 0.36, length: 3.86))
         obstacles.append(expandedObstacle(centerX: 3.88, centerZ: 7.25, width: 0.36, length: 3.86))
@@ -721,7 +1355,42 @@ final class GameManager: ObservableObject {
             obstacles.append(expandedObstacle(centerX: 6.55, centerZ: lockerZ, width: 0.5, length: 0.42))
         }
 
+        let teacherPosition = teacherFreeRoamPosition
+        obstacles.append(expandedObstacle(centerX: teacherPosition.x, centerZ: teacherPosition.z, width: 0.66, length: 0.62))
+
         return obstacles
+    }
+
+    private func doorLeafObstacles(for door: StudentDoor) -> [FreeRoamRect] {
+        if isStudentDoorOpen(door) {
+            return [
+                expandedObstacle(centerX: 4.31, centerZ: door.centerZ - 0.43, width: 0.37, length: 0.08),
+                expandedObstacle(centerX: 4.31, centerZ: door.centerZ + 0.43, width: 0.37, length: 0.08)
+            ]
+        }
+        return [
+            expandedObstacle(centerX: 4.02, centerZ: door.centerZ - 0.19, width: 0.08, length: 0.37),
+            expandedObstacle(centerX: 4.02, centerZ: door.centerZ + 0.19, width: 0.08, length: 0.37)
+        ]
+    }
+
+    func isDoorBlockingFreeRoamPosition(_ door: StudentDoor, x: Double, z: Double) -> Bool {
+        doorLeafObstacles(for: door).contains { $0.intersectsCircle(x: x, z: z, radius: currentFreeRoamPlayerRadius) }
+    }
+
+    var teacherFreeRoamPosition: (x: Double, z: Double) {
+        let path: [(x: Double, z: Double)] = [
+            (-2.7, -4.25), (2.6, -3.2), (2.6, -1.2),
+            (1.2, 0.45), (0.2, 1.55), (-2.2, 0.4),
+            (-2.8, -1.4), (0, -4.35), (-3.45, 4.25)
+        ]
+        return path[min(max(teacher.positionIndex, 0), path.count - 1)]
+    }
+
+    func isTeacherBlockingFreeRoamPosition(x: Double, z: Double) -> Bool {
+        let position = teacherFreeRoamPosition
+        let obstacle = expandedObstacle(centerX: position.x, centerZ: position.z, width: 0.66, length: 0.62)
+        return obstacle.intersectsCircle(x: x, z: z, radius: currentFreeRoamPlayerRadius)
     }
 
     private func expandedObstacle(centerX: Double, centerZ: Double, width: Double, length: Double) -> FreeRoamRect {
@@ -739,6 +1408,7 @@ final class GameManager: ObservableObject {
             freeRoamTimer = nil
             return
         }
+        guard case .playing = gameState else { return }
         if freeRoam.remainingSeconds <= 0 {
             returnToSeatFromFreeRoam(reason: "时间到了，你回到座位。走廊里的空气留在身后，晚自习重新包围过来。")
         } else {
@@ -747,15 +1417,46 @@ final class GameManager: ObservableObject {
     }
 
     func returnToSeatFromFreeRoam(reason: String? = nil) {
-        guard freeRoam.isActive else { return }
+        guard freeRoam.isActive, isReturningToSeat == false else { return }
         let exitedClassroom = freeRoam.hasExitedClassroom
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
+        freeRoamPausedAt = nil
+        flushSprintHunger()
+        clearFreeRoamMovementModifiers()
+        isReturningToSeat = true
+        returnToSeatStartedAt = Date()
+        message = reason ?? "你转身沿原路回座。脚步声逐渐靠近教室，视野在短暂闭合后重新落回桌面。"
+        addAudioCue(.footstep, direction: freeRoam.hasExitedClassroom ? "走廊到教室" : "座位过道", intensity: 0.46, note: "回座的脚步由远及近，在闭眼的瞬间与教室环境声重新重合。")
+        returnToSeatTask?.cancel()
+        returnToSeatTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(GameManager.returnToSeatResetDelay * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, self.isReturningToSeat else { return }
+            self.completeReturnToSeat(exitedClassroom: exitedClassroom, reason: reason)
+            do {
+                let revealDuration = GameManager.returnToSeatTotalDuration - GameManager.returnToSeatResetDelay
+                try await Task.sleep(nanoseconds: UInt64(revealDuration * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard self.isReturningToSeat else { return }
+            self.isReturningToSeat = false
+            self.returnToSeatStartedAt = .distantPast
+            self.returnToSeatTask = nil
+        }
+    }
+
+    private func completeReturnToSeat(exitedClassroom: Bool, reason: String?) {
         freeRoam = StudentFreeRoamState()
         studentLookYaw = 0
         studentLookPitch = 0
         cameraPose = .forward
         player.posture = .seated
+        addAudioCue(.chair, direction: "座位下方", intensity: 0.38, note: "椅子轻响标记了回座动作真正完成。")
 
         if exitedClassroom {
             player.psychicEnergy += 16
@@ -832,6 +1533,20 @@ final class GameManager: ObservableObject {
         }
         currentPhase = .action
 
+        if isPrologueActive {
+            if prologueState.currentBeat == .settleBreath, action == .breathe {
+                addAudioCue(.heartbeat, direction: "颅内", intensity: 0.2, note: "呼吸慢下来，教室的声音重新有了边界。")
+                prologueActionReady = true
+                message = "呼吸慢了下来。按 C 可以提前结束这一步，也可以继续感受片刻。"
+            }
+            return
+        }
+
+        if chapterOneStep == .followLinChe, action == .leaveSeat {
+            completeChapterOne()
+            return
+        }
+
         switch action {
         case .study:
             spendAttention(for: .desk, multiplier: 0.8)
@@ -906,7 +1621,7 @@ final class GameManager: ObservableObject {
                 player.psychicEnergy += 3
                 player.stress = max(0, player.stress - 3)
                 player.exposure += teacher.isNearPlayer ? 3 : 0.8
-                message = "你低头喝了一口水。口渴下降 20，杯子里的水减少 25。"
+                message = "你低头喝了一口水。喉咙没有刚才那么紧，注意力也慢慢回到教室。"
                 addAudioCue(.paper, direction: "桌面近处", intensity: 0.18, note: "杯子碰到桌面的声音很轻，但老师很近时仍会被注意到。")
             } else {
                 player.stress += 2
@@ -962,6 +1677,8 @@ final class GameManager: ObservableObject {
 
         applyBodyNeeds()
         clampPlayer()
+        collectChapterClue(for: action)
+        maybeAddAnomalyMonologue()
         if case .event = gameState {
             recordSnapshot(actionLabel: action.rawValue)
             return
@@ -1095,12 +1812,17 @@ final class GameManager: ObservableObject {
             currentPhase = .observation
             updatePerception()
             applyTimeProgression()
+            clampPlayer()
+            maybeAddAnomalyMonologue()
             checkCriticalState()
         }
     }
 
     func continueAfterEvent() {
         if currentTurn >= maxTurns {
+            if presentChapterOneDecisionIfNeeded() {
+                return
+            }
             finish()
             return
         }
@@ -1108,6 +1830,7 @@ final class GameManager: ObservableObject {
         currentTurn += 1
         currentPhase = .observation
         gameState = .playing
+        resumeFreeRoamAfterEvent()
         player.psychicEnergy = min(100, player.psychicEnergy + 4 + player.support / 30)
         recoverAttention(20)
         player.maskCost += 2
@@ -1117,6 +1840,8 @@ final class GameManager: ObservableObject {
         recordSnapshot(actionLabel: "事件后继续")
         updatePerception()
         applyTimeProgression()
+        clampPlayer()
+        maybeAddAnomalyMonologue()
         checkCriticalState()
     }
 
@@ -1130,6 +1855,15 @@ final class GameManager: ObservableObject {
         let pressure = teacher.kpiPressure * 0.22 + teacher.fatigue * 0.16 + settings.patrolFrequency * 0.08 - teacher.empathy * 0.12
         let discoveryRisk = player.exposure + pressure + (cameraPose == .desk ? 8 : 0) + (player.visualAttention < 18 ? 8 : 0)
         maybeAddTeacherStateCue(pressure: pressure)
+
+        if activeChapter == .silentClassroom {
+            if currentTurn < maxTurns { currentTurn += 1 }
+            currentPhase = .observation
+            updatePerception()
+            clampPlayer()
+            maybeAddAnomalyMonologue()
+            return
+        }
 
         if shouldFakePatrol(pressure: pressure, discoveryRisk: discoveryRisk) {
             teacher.positionIndex = max(0, teacher.positionIndex - 1)
@@ -1203,10 +1937,38 @@ final class GameManager: ObservableObject {
             addAudioCue(.heartbeat, direction: "颅内", intensity: 1.0, note: "外界声音退后，心跳和耳鸣占据中心。")
             audio.playWarning()
         } else {
+            if currentTurn >= maxTurns, presentChapterOneDecisionIfNeeded() {
+                clampPlayer()
+                return
+            }
             continueAfterEvent()
         }
 
         clampPlayer()
+    }
+
+    @discardableResult
+    private func presentChapterOneDecisionIfNeeded() -> Bool {
+        guard activeChapter == .silentClassroom,
+              activeRole.isTeacher == false,
+              hasPresentedChapterOneDecision == false else {
+            return false
+        }
+
+        hasPresentedChapterOneDecision = true
+        collectChapterClue(.unsignedNote, messageSuffix: "那张不署名纸条最终还是被你看见了。")
+        presentEvent(
+            kind: .classmateHelpRequest(classmateID: highestRiskClassmate?.id ?? 0),
+            title: "关卡一结束：不署名纸条",
+            body: "下课前，纸条压在你的草稿纸下面。你已经记录了 \(chapterClues.count) 条线索，但仍然不知道全部真相。现在要决定：这件事由谁一起承担。",
+            choices: [
+                EventChoice(id: "chapter1_teacher", title: "交给方老师", detail: "最快进入成人支持路径，也可能让当事人感到被曝光"),
+                EventChoice(id: "chapter1_monitor", title: "找可靠班干部共同判断", detail: "形成同伴协作链，但会把责任分给另一个学生"),
+                EventChoice(id: "chapter1_tomorrow", title: "明天再确认", detail: "尊重边界，但可能错过今晚的信息窗口"),
+                EventChoice(id: "chapter1_wait", title: "下课后在走廊等一等", detail: "保留当事人的主动性，也承担独自等待的不确定")
+            ]
+        )
+        return true
     }
 
     private func shouldRearDoorObserve(pressure: Double, discoveryRisk: Double) -> Bool {
@@ -1242,6 +2004,10 @@ final class GameManager: ObservableObject {
     }
 
     private func checkCriticalState() {
+        if activeChapter == .silentClassroom {
+            maybeAddAnomalyMonologue()
+            return
+        }
         if let crying = classmates.first(where: { $0.state == .crying }), player.helpedClassmate == false {
             appendEvent(title: "\(crying.name)崩溃", detail: "同桌的肩膀在抖。你可以选择靠近，也可以继续假装没看见。")
             presentEvent(
@@ -1312,6 +2078,10 @@ final class GameManager: ObservableObject {
     }
 
     private func calculateEnding() -> Ending {
+        if activeChapter == .silentClassroom, hasPresentedChapterOneDecision {
+            return chapterOneEnding()
+        }
+
         if activeRole.isTeacher || teacher.studentsWarned + teacher.studentsHelped > 4 {
             return teacherEnding()
         }
@@ -1380,6 +2150,36 @@ final class GameManager: ObservableObject {
             empathyReflections: empathyReflections(kind: .ordinary),
             relationshipEchoes: relationshipEchoes(),
             analysis: endingMetrics(),
+            comparisons: endingComparisons(),
+            resources: supportResources()
+        )
+    }
+
+    private func chapterOneEnding() -> Ending {
+        let clueTitles = chapterClues.map(\.title).joined(separator: "、")
+        let decision = chapterOneDecision.isEmpty ? "暂未决定" : chapterOneDecision
+        let supportLine = "纸条仍然没有署名。下一章先跟随林澈进入走廊，纸条来源将在之后继续确认。"
+
+        return Ending(
+            title: "关卡一完成：静音的教室",
+            body: "你没有看见全部真相，但已经发现了 \(chapterClues.count) 条值得被认真对待的信号：\(clueTitles.isEmpty ? "暂无明确线索" : clueTitles)。",
+            reflection: "你的章末行动是：\(decision)。\(supportLine)",
+            story: EndingStory(
+                title: "关卡复盘：看见不是审判",
+                body: "这一关的目标不是猜出谁一定有问题，而是在有限视野里承认异常值得被记录。遗漏不是失败，强行拯救也不是答案；重要的是找到能一起承担的人。",
+                prompt: "回想这一关：哪个信号最早出现？你当时是选择确认、等待，还是继续完成自己的事？"
+            ),
+            empathyReflections: [
+                EmpathyReflection(role: "苏念", icon: "person.fill", text: "你是心理委员，但不是专业咨询师。你能做的是看见、记录、陪在附近，并在风险升高时找到成人或同伴支持。"),
+                EmpathyReflection(role: "同学", icon: "person.2.fill", text: "班级里的每个人都可能是线索来源，也可能正在被责任压着。协作不是把问题甩给别人，而是让支持链更稳。"),
+                EmpathyReflection(role: "方老师", icon: "graduationcap.fill", text: "老师也只能从表面动作判断。你提供具体线索，而不是只说“有人不对劲”，会让成人支持更容易开始。")
+            ],
+            relationshipEchoes: relationshipEchoes(),
+            analysis: [
+                EndingMetric(title: "可靠线索", value: "\(chapterClues.count)", note: "来自实际观察，而不是状态数值或系统判断"),
+                EndingMetric(title: "章末行动", value: decision, note: "第一章固定进入走廊主线，不设置安全性错误分支"),
+                EndingMetric(title: "支持方式", value: player.helpedClassmate ? "已有连接" : "尚未外显", note: "低声询问、纸条和共同判断都会改变后续关系")
+            ],
             comparisons: endingComparisons(),
             resources: supportResources()
         )
@@ -1697,6 +2497,12 @@ final class GameManager: ObservableObject {
             appendEvent(title: period.displayName, detail: "短暂休息让教室的紧绷松开一点。")
             addAudioCue(.chair, direction: "教室四周", intensity: 0.48, note: "课间椅子声和低语短暂盖过了纪律。")
             message = "\(clockText)，\(period.displayName)。所有人都像终于被允许呼吸了一下。"
+            if activeRole.isTeacher == false && freeRoam.isActive == false {
+                beginStudentFreeRoam(
+                    duration: 300,
+                    openingMessage: "\(clockText)，\(period.displayName)。课间自动开始，你可以自由活动 5 分钟；去接水、上厕所，或到一班前方左转门厅看向户外。"
+                )
+            }
         case .third:
             player.stress += 8
             teacher.fatigue += 8
@@ -1755,6 +2561,9 @@ final class GameManager: ObservableObject {
 
             classmates[index] = classmate
         }
+
+        // 第一章保留性格驱动的同学状态变化，但不让旧版随机事件抢占线索主线。
+        if activeChapter == .silentClassroom { return }
 
         if currentTurn == 10 && classroomLightLevel > 0.9 && Double.random(in: 0...1) < 0.34 {
             classroomLightLevel = 0.32
@@ -2130,13 +2939,29 @@ final class GameManager: ObservableObject {
         }
     }
 
-    private func presentEvent(kind: ActiveEventKind, title: String, body: String, choices: [EventChoice]) {
+    func presentEvent(kind: ActiveEventKind, title: String, body: String, choices: [EventChoice]) {
+        pauseFreeRoamForEvent()
         gameState = .event(ActiveEvent(kind: kind, title: title, body: body, choices: choices))
+    }
+
+    private func pauseFreeRoamForEvent() {
+        guard freeRoam.isActive, freeRoamPausedAt == nil else { return }
+        freeRoamPausedAt = Date()
+    }
+
+    private func resumeFreeRoamAfterEvent() {
+        guard freeRoam.isActive, let pausedAt = freeRoamPausedAt else {
+            freeRoamPausedAt = nil
+            return
+        }
+        freeRoam.endsAt = freeRoam.endsAt.addingTimeInterval(Date().timeIntervalSince(pausedAt))
+        freeRoamPausedAt = nil
     }
 
     func resolveEventChoice(_ choice: EventChoice) {
         guard case .event(let event) = gameState else { return }
         var shouldContinueAfterChoice = true
+        var shouldFinishAfterChoice = false
 
         switch choice.id {
         case "accept_warning":
@@ -2416,12 +3241,55 @@ final class GameManager: ObservableObject {
             player.support = max(0, player.support - 10)
             addMonologue("我不想再被他看着，可我也知道这句话会留下新的记忆。", intensity: 0.68)
             message = "你回看过去。对方移开视线，但这段关系更难回到普通。"
+        case "chapter1_teacher":
+            chapterOneDecision = "交给方老师"
+            teacher.studentsHelped += 1
+            teacher.empathy += 2
+            player.support += 8
+            player.maskCost += 4
+            addMonologue("我不是把责任推走，是承认这件事不能只靠一个学生扛。", intensity: 0.58)
+            message = "你把纸条交给方老师。她没有立刻追问是谁写的，只先问你还记得哪些细节。下一关会从成人支持链开始。"
+            shouldContinueAfterChoice = false
+            shouldFinishAfterChoice = true
+        case "chapter1_monitor":
+            chapterOneDecision = "找可靠班干部共同判断"
+            player.support += 12
+            player.psychicEnergy -= 4
+            player.maskCost += 3
+            addMonologue("找人一起判断，比一个人猜答案更踏实，也更沉。", intensity: 0.52)
+            message = "你找到一个可靠班干部共同判断。事情没有解决，但支持链多了一个节点。下一关会出现协作行动。"
+            shouldContinueAfterChoice = false
+            shouldFinishAfterChoice = true
+        case "chapter1_tomorrow":
+            chapterOneDecision = "明天再确认"
+            player.exposure = max(0, player.exposure - 8)
+            player.stress += 6
+            player.maskCost += 6
+            addMonologue("我把纸条收好，可它今晚不会因为被收好就变轻。", intensity: 0.66)
+            message = "你决定明天再确认。这个选择保留了边界，也留下了不确定。下一关可用信息会更少。"
+            shouldContinueAfterChoice = false
+            shouldFinishAfterChoice = true
+        case "chapter1_wait":
+            chapterOneDecision = "下课后在走廊等一等"
+            player.support += 5
+            player.stress += 4
+            player.exposure += 4
+            addMonologue("我不能替那个人说话，但我可以让走廊里多一个愿意等的人。", intensity: 0.56)
+            message = "你决定下课后在走廊等一等。不追问、不围堵，只留下一个可以开口的位置。下一关会从走廊等待开始。"
+            shouldContinueAfterChoice = false
+            shouldFinishAfterChoice = true
         default:
             message = "你让这个瞬间过去了。"
         }
 
         clampPlayer()
         clampTeacher()
+        maybeAddAnomalyMonologue()
+        if shouldFinishAfterChoice {
+            recordSnapshot(actionLabel: choice.title)
+            finish()
+            return
+        }
         if shouldContinueAfterChoice == false {
             recordSnapshot(actionLabel: choice.title)
             updatePerception()
@@ -2476,6 +3344,140 @@ final class GameManager: ObservableObject {
         if monologues.count > 5 {
             monologues.removeLast()
         }
+        guard activeRole.isTeacher == false, intensity >= 0.48 else { return }
+        let presentation = FeaturedMonologue(text: text, intensity: intensity.clamped(to: 0...1))
+        featuredMonologue = presentation
+        monologueDismissTask?.cancel()
+        monologueDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(intensity >= 0.75 ? 5.2 : 4.0))
+            guard Task.isCancelled == false, self?.featuredMonologue?.id == presentation.id else { return }
+            self?.featuredMonologue = nil
+        }
+    }
+
+    func dismissFeaturedMonologue() {
+        monologueDismissTask?.cancel()
+        featuredMonologue = nil
+    }
+
+    private func collectChapterClue(for action: PlayerAction) {
+        guard activeChapter == .silentClassroom, activeRole.isTeacher == false, hasPresentedChapterOneDecision == false else { return }
+
+        switch chapterOneStep {
+        case .observeLinChe where action == .observe && cameraPose == .left:
+            collectChapterClue(.linChePage, messageSuffix: "林澈的书停在同一页太久了，笔尖也没有动。")
+            advanceChapterOne(to: .locateHiddenSound, cue: "右侧传来一声很轻的鼻息，又被翻书声盖住。")
+        case .locateHiddenSound where action == .observe && cameraPose == .right:
+            collectChapterClue(.hiddenCrying, messageSuffix: "那不是椅子声。有人在努力把情绪压回去。")
+            advanceChapterOne(to: .regulateSelf, cue: "方老师的脚步靠近，视线开始有一点散。")
+            addBackgroundSignalReaction()
+        case .regulateSelf where action == .breathe || action == .drink:
+            addMonologue("我也在这间教室里。先让自己缓一下，才听得清别人。", intensity: 0.64)
+            advanceChapterOne(to: .approachLinChe, cue: "林澈抬头看了一眼门口，开始把笔收回笔袋。")
+        case .approachLinChe where action == .talk || action == .note:
+            player.helpedClassmate = true
+            addMonologue("他说没事，可那句话落得太快了，像是早就练习过。", intensity: 0.62)
+            addAudioCue(.paper, direction: "桌面右侧", intensity: 0.58, note: "前排同学起身时，一张折过的纸滑到桌边。")
+            advanceChapterOne(to: .inspectNote, cue: "铃声响起，一张纸从桌边滑了下来。")
+        case .inspectNote where (action == .observe && cameraPose == .desk) || action == .note:
+            collectChapterClue(.unsignedNote, messageSuffix: "纸条没有署名：心里很难受，但我不知道找谁说。")
+            advanceChapterOne(to: .followLinChe, cue: "你再抬头时，林澈已经走到教室门口。")
+        default:
+            message += " 这还不能确认当前目标。"
+        }
+    }
+
+    private func advanceChapterOne(to step: ChapterOneStep, cue: String) {
+        chapterOneStep = step
+        message = cue
+    }
+
+    private func addBackgroundSignalReaction() {
+        guard let classmate = classmates.filter({ $0.id > 4 }).randomElement() else { return }
+        let reaction = "\(classmate.name)\(classmate.profile.signalReaction)。"
+        message += " \(reaction)"
+        appendEvent(title: "班级反应", detail: reaction)
+    }
+
+    private func completeChapterOne() {
+        chapterOneStep = .completed
+        hasPresentedChapterOneDecision = true
+        chapterOneDecision = "跟随林澈进入走廊"
+        player.posture = .standing
+        addAudioCue(.chair, direction: "桌边", intensity: 0.66, note: "你起身时椅子轻响，林澈的脚步正越过前门。")
+        addMonologue("纸条还不知道是谁写的。但林澈现在不该一个人走。", intensity: 0.78)
+        message = "你把纸条收进口袋，起身跟上林澈。教室的声音留在身后，走廊尽头的镜子亮着。"
+        recordSnapshot(actionLabel: "跟上林澈")
+        finish()
+    }
+
+    private func collectChapterClue(_ id: ChapterClueID, messageSuffix: String) {
+        guard chapterClues.contains(where: { $0.id == id }) == false else { return }
+        chapterClues.append(ChapterClue(id: id, turn: currentTurn, title: id.title, detail: id.detail))
+        appendEvent(title: "线索：\(id.title)", detail: id.detail)
+        message += " \(messageSuffix)"
+        addMonologue(chapterClueMonologue(for: id), intensity: id == .unsignedNote ? 0.72 : 0.48)
+        addAudioCue(id == .teacherSigh ? .teacherSigh : .paper, direction: clueAudioDirection(for: id), intensity: id == .unsignedNote ? 0.56 : 0.34, note: id.detail)
+    }
+
+    private func chapterClueMonologue(for clue: ChapterClueID) -> String {
+        switch clue {
+        case .linChePage:
+            return "他看起来一直很稳，可稳不等于没事。"
+        case .hiddenCrying:
+            return "那道声音很轻。藏得住，不代表它不值得被听见。"
+        case .monitorOverload:
+            return "班干部也会被责任压住，只是他们更习惯把累藏起来。"
+        case .teacherSigh:
+            return "老师也在压力里。她能不能看见我们，也取决于她还剩多少力气。"
+        case .unsignedNote:
+            return "这张纸条不是给我的，却落到了我这里。也许它是在找一个能一起承担的人。"
+        }
+    }
+
+    private func clueAudioDirection(for clue: ChapterClueID) -> String {
+        switch clue {
+        case .linChePage: return "左侧近处"
+        case .hiddenCrying: return "右侧近处"
+        case .monitorOverload: return "后方左侧"
+        case .teacherSigh: return "讲台前方"
+        case .unsignedNote: return "桌面"
+        }
+    }
+
+    func maybeAddAnomalyMonologue() {
+        guard activeRole.isTeacher == false else { return }
+        if player.psychicEnergy <= 24 {
+            addAnomalyMonologue(key: "energy", text: "眼前的字开始黏在一起。我可能不是懒，是需要先停一下。", intensity: 0.82)
+        }
+        if player.stress >= 78 {
+            addAnomalyMonologue(key: "stress", text: "身体一直绷着，连风扇声都像催促。也许我需要先把呼吸放慢。", intensity: 0.78)
+        }
+        if player.maskCost >= 72 {
+            addAnomalyMonologue(key: "mask", text: "我把表情摆得太久了，久到快分不清自己是不是真的没事。", intensity: 0.76)
+        }
+        if player.exposure >= 74 {
+            addAnomalyMonologue(key: "exposure", text: "我好像太显眼了。现在最需要的不是再确认一次，而是先收回动作。", intensity: 0.72)
+        }
+        if player.visualAttention <= 18 {
+            addAnomalyMonologue(key: "attention", text: "视线开始散，声音反而变近。可能该换一个低消耗动作。", intensity: 0.7)
+        }
+        if player.thirst >= 76 {
+            addAnomalyMonologue(key: "thirst", text: "喉咙干得让我读不进题。身体需求不会因为晚自习安静就消失。", intensity: 0.68)
+        }
+        if player.hunger >= 80 {
+            addAnomalyMonologue(key: "hunger", text: "胃里空得发紧。注意力不是只靠意志力撑出来的。", intensity: 0.68)
+        }
+        if player.bladder >= 82 {
+            addAnomalyMonologue(key: "bladder", text: "我一直在忍，忍到连题目都只剩下背景。可能该找一个合法出口。", intensity: 0.72)
+        }
+    }
+
+    private func addAnomalyMonologue(key: String, text: String, intensity: Double) {
+        let previousTurn = lastAnomalyMonologueTurn[key] ?? -99
+        guard currentTurn - previousTurn >= 3 else { return }
+        lastAnomalyMonologueTurn[key] = currentTurn
+        addMonologue(text, intensity: intensity)
     }
 
     private func panValue(for direction: String) -> Double {
@@ -2984,7 +3986,7 @@ final class GameManager: ObservableObject {
     }
 
     private func makeClassmates() -> [Classmate] {
-        let names = ["林澈", "周雨", "陈默", "许安", "赵晴", "何屿", "唐宁", "沈星", "顾言", "叶舟", "韩夏", "白辰", "陆遥", "秦一", "苏禾", "姜南", "程川", "宋也", "黎昕"]
+        let names = ["林澈", "周予安", "江越", "陈言", "许栀", "何屿", "唐宁", "沈星", "顾言", "叶舟", "韩夏", "白辰", "陆遥", "秦一", "苏禾", "姜南", "程川", "宋也", "黎昕"]
         var result: [Classmate] = []
         var id = 0
         for row in 0..<5 {
@@ -2992,7 +3994,7 @@ final class GameManager: ObservableObject {
                 if row == 2 && column == 1 { continue }
                 let name = names[id % names.count]
                 let isDeskmate = row == 2 && (column == 0 || column == 2)
-                let profile = classmateProfile(seed: id)
+                let profile = classmateProfile(id: id)
                 let memory = classmateMemory[id]
                 let baseRelationship = isDeskmate ? 42 : Double.random(in: 10...45)
                 let baseStress = isDeskmate ? Double.random(in: 54...86) + profile.anxiety / 12 : Double.random(in: 20...85) + profile.anxiety / 18
@@ -3014,18 +4016,33 @@ final class GameManager: ObservableObject {
         return result
     }
 
-    private func classmateProfile(seed: Int) -> ClassmateProfile {
-        func value(_ offset: Int, base: Double, spread: Double) -> Double {
-            let raw = Double((seed * 37 + offset * 53) % 101) / 100
-            return (base + (raw - 0.5) * spread).clamped(to: 5...95)
+    private func classmateProfile(id: Int) -> ClassmateProfile {
+        switch id {
+        case 0: // 林澈：学习委员，完美主义和高面具强度固定
+            return ClassmateProfile(cooperation: 72, orderliness: 91, rebelliousness: 12, empathy: 66, anxiety: 78, maskStrength: 92)
+        case 1: // 周予安：班长，可靠但容易过度承担
+            return ClassmateProfile(cooperation: 90, orderliness: 86, rebelliousness: 10, empathy: 70, anxiety: 58, maskStrength: 76)
+        case 2: // 江越：危机主线当事人，回避且认为自己是负担
+            return ClassmateProfile(cooperation: 34, orderliness: 62, rebelliousness: 24, empathy: 74, anxiety: 91, maskStrength: 84)
+        case 3: // 陈言：纪律委员，守序且容易把关心变成控制
+            return ClassmateProfile(cooperation: 62, orderliness: 94, rebelliousness: 8, empathy: 42, anxiety: 46, maskStrength: 70)
+        case 4: // 许栀：文体委员，擅长低压力接近
+            return ClassmateProfile(cooperation: 84, orderliness: 42, rebelliousness: 54, empathy: 88, anxiety: 32, maskStrength: 48)
+        default:
+            break
+        }
+
+        // 普通同学每局重新抽取性格。同一套事件规则会因此产生不同反应。
+        func value(_ base: Double, spread: Double) -> Double {
+            (base + Double.random(in: (-spread / 2)...(spread / 2))).clamped(to: 5...95)
         }
         return ClassmateProfile(
-            cooperation: value(1, base: 54, spread: 70),
-            orderliness: value(2, base: 56, spread: 76),
-            rebelliousness: value(3, base: 44, spread: 72),
-            empathy: value(4, base: 52, spread: 78),
-            anxiety: value(5, base: 42, spread: 82),
-            maskStrength: value(6, base: 56, spread: 74)
+            cooperation: value(54, spread: 70),
+            orderliness: value(56, spread: 76),
+            rebelliousness: value(44, spread: 72),
+            empathy: value(52, spread: 78),
+            anxiety: value(42, spread: 82),
+            maskStrength: value(56, spread: 74)
         )
     }
 }

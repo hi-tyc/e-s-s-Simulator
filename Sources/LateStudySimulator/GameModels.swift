@@ -8,6 +8,91 @@ enum GameState: Equatable {
     case ending(Ending)
 }
 
+enum StoryChapter: String {
+    case silentClassroom = "关卡一 · 静音的教室"
+
+    var objective: String {
+        switch self {
+        case .silentClassroom:
+            return "在信息不完整的晚自习里，听见异常、确认线索，并跟上独自离开的林澈。"
+        }
+    }
+}
+
+enum ChapterOneStep: Int, CaseIterable, Equatable {
+    case observeLinChe
+    case locateHiddenSound
+    case regulateSelf
+    case approachLinChe
+    case inspectNote
+    case followLinChe
+    case completed
+
+    var objective: String {
+        switch self {
+        case .observeLinChe: return "看看林澈今晚在做什么"
+        case .locateHiddenSound: return "听清右侧那道声音"
+        case .regulateSelf: return "先让自己缓一下"
+        case .approachLinChe: return "下课前，问林澈一句"
+        case .inspectNote: return "捡起掉到桌边的纸条"
+        case .followLinChe: return "别让林澈一个人离开"
+        case .completed: return "第一章完成"
+        }
+    }
+
+    var guidance: String {
+        switch self {
+        case .observeLinChe: return "看向左侧，确认那阵停下来的翻书声。"
+        case .locateHiddenSound: return "转向右侧，别让翻书声盖住那一下鼻息。"
+        case .regulateSelf: return "不用读数值。喝口水，或者先把呼吸放慢。"
+        case .approachLinChe: return "铃响前，用一句低压力的话靠近他。"
+        case .inspectNote: return "低头看桌面，确认刚才滑落的纸片。"
+        case .followLinChe: return "林澈已经走向门口。现在起身跟上。"
+        case .completed: return "你带着匿名纸条走进了走廊。"
+        }
+    }
+}
+
+enum ChapterClueID: String, CaseIterable, Hashable {
+    case linChePage
+    case hiddenCrying
+    case monitorOverload
+    case teacherSigh
+    case unsignedNote
+
+    var title: String {
+        switch self {
+        case .linChePage: return "林澈的书页"
+        case .hiddenCrying: return "被藏住的鼻息"
+        case .monitorOverload: return "班长的停顿"
+        case .teacherSigh: return "方老师的叹气"
+        case .unsignedNote: return "不署名纸条"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .linChePage:
+            return "学习委员很久没有翻页，手指反复摸着错题本折角。"
+        case .hiddenCrying:
+            return "右侧传来一声被翻书声盖住的鼻息，像是有人在藏住情绪。"
+        case .monitorOverload:
+            return "班长替别人收尾太多事，自己的练习册还空着。"
+        case .teacherSigh:
+            return "方老师巡视时停顿变长，叹气声比脚步声更明显。"
+        case .unsignedNote:
+            return "纸条上写着：心里很难受，但我不知道找谁说。"
+        }
+    }
+}
+
+struct ChapterClue: Identifiable, Equatable {
+    let id: ChapterClueID
+    let turn: Int
+    let title: String
+    let detail: String
+}
+
 enum ActiveEventKind: Equatable {
     case discovery
     case teacherConcern
@@ -44,6 +129,16 @@ struct InnerMonologue: Identifiable {
     let turn: Int
     let text: String
     let intensity: Double
+}
+
+struct FeaturedMonologue: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+    let intensity: Double
+
+    static func == (lhs: FeaturedMonologue, rhs: FeaturedMonologue) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 enum ViewMode: String, CaseIterable {
@@ -397,6 +492,7 @@ struct StudentFreeRoamState {
     var endsAt: Date = .distantPast
     var hasExitedClassroom: Bool = false
     var isSideways: Bool = false
+    var isSprinting: Bool = false
     var frontDoorOpen: Bool = false
     var rearDoorOpen: Bool = false
 
@@ -596,6 +692,15 @@ struct ClassmateProfile: Equatable {
         if rebelliousness > 72 { return "叛逆" }
         if maskStrength < 38 { return "面具薄" }
         return "普通"
+    }
+
+    var signalReaction: String {
+        if empathy > 72 { return "停下笔，朝声音的方向看了一眼，又很快移开视线" }
+        if anxiety > 68 { return "肩膀明显僵了一下，翻页的动作变得更快" }
+        if orderliness > 72 { return "把头压得更低，像是不确定自己是否应该介入" }
+        if rebelliousness > 72 { return "没有继续装作没听见，直接回头确认了一眼" }
+        if maskStrength < 38 { return "手里的笔停住了，自己的呼吸也乱了一拍" }
+        return "短暂停了一下，又继续写题"
     }
 }
 
