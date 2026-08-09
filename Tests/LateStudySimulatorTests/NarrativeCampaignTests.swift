@@ -2,6 +2,15 @@ import XCTest
 @testable import LateStudySimulator
 
 final class NarrativeCampaignTests: XCTestCase {
+    func testMelodyFeedbackNamesTheActualNextPad() {
+        var campaign = NarrativeCampaign(isActive: true, chapter: .mirror, momentIndex: 2)
+        campaign.miniGameProgress = 3
+
+        let feedback = MirrorMicroGameInputFeedbackModel.ready(from: campaign, miniGame: .melody)
+
+        XCTAssertEqual(feedback.targetText, "目标：第 4 拍 笔")
+    }
+
     private let maximumCampaignSteps = 240
 
     func testLegacyCampaignSaveDecodesWithoutNewSafetySubstates() throws {

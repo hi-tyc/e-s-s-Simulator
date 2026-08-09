@@ -162,9 +162,19 @@ final class GameManager: ObservableObject {
     @Published var isPrologueActive = false
     @Published var prologueState = PrologueState()
     @Published var prologueBeatElapsed: TimeInterval = 0
+    @Published var prologueLookExplorationElapsed: TimeInterval = 0
+    @Published var prologueActionReady = false
+    @Published var prologueSeatNearby = false
+    @Published var isPrologueTutorialPresented = false
+    @Published var isChapterOneTransitionPresented = false
     @Published private(set) var prologuePauseReasons: Set<ProloguePauseReason> = []
     @Published var accessibilityPreferences = AccessibilityPreferences()
     @Published var isAccessibilityPanelPresented = false
+    @Published var prologuePerformancePhase = 0
+    @Published var isGameGuidePresented = false
+    @Published var menuGuideCountdown = 5
+    @Published var gameGuideExitCountdown = 0
+    @Published private(set) var hasCompletedInitialGameGuide = false
     @Published var narrativeCampaign = NarrativeCampaign()
     private(set) var narrativeBoundaryDwellSeconds = 0.0
     private(set) var narrativeBoundaryPullbackCount = 0
@@ -267,8 +277,9 @@ final class GameManager: ObservableObject {
         #endif
     }()
     private var prologueTimer: Timer?
+    private var menuGuideTimer: Timer?
+    private var gameGuideExitTimer: Timer?
     private var prologueDwell: TimeInterval = 0
-    private var prologuePerformanceMoments: Set<String> = []
     private var freeRoamTimer: Timer?
     private var freeRoamPausedAt: Date?
     private var returnToSeatTask: Task<Void, Never>?
@@ -319,11 +330,13 @@ final class GameManager: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         isDeveloperPanelPresented = arguments.contains("--developer-tools")
         if arguments.contains("--autoplay-campaign") {
+            hasCompletedInitialGameGuide = true
             DispatchQueue.main.async { [weak self] in
                 self?.mouseLookEnabled = false
                 self?.startDeveloperAutoplay()
             }
         } else if arguments.contains("--narrative-demo") {
+            hasCompletedInitialGameGuide = true
             DispatchQueue.main.async { [weak self] in
                 self?.startFullNarrativeCampaign()
                 self?.mouseLookEnabled = false
@@ -339,10 +352,61 @@ final class GameManager: ObservableObject {
 
     func startExperience(forcePrologue: Bool = false) {
         if forcePrologue || prologueState.prologueCompleted == false {
-            startPrologue(resume: prologueState.completedBeats.isEmpty == false)
+            // Entering from the menu is an authored replay, so always include the
+            // exterior arrival instead of silently resuming inside the building.
+            startPrologue(resume: false)
         } else {
-            startGame()
+            startFullNarrativeCampaign()
         }
+    }
+
+    var isMenuEntryLocked: Bool { hasCompletedInitialGameGuide == false }
+
+    func beginInitialGameGuideIfNeeded() {
+        guard hasCompletedInitialGameGuide == false,
+              isGameGuidePresented == false,
+              menuGuideTimer == nil else { return }
+        guard case .menu = gameState else {
+            hasCompletedInitialGameGuide = true
+            return
+        }
+        menuGuideCountdown = 0
+        presentGameGuide(isInitialPresentation: true)
+    }
+
+    func advanceMenuGuideCountdown() {
+        guard hasCompletedInitialGameGuide == false, isGameGuidePresented == false else { return }
+        menuGuideCountdown = max(0, menuGuideCountdown - 1)
+        if menuGuideCountdown == 0 {
+            menuGuideTimer?.invalidate()
+            menuGuideTimer = nil
+            presentGameGuide(isInitialPresentation: true)
+        }
+    }
+
+    func presentGameGuide(isInitialPresentation: Bool = false) {
+        isGameGuidePresented = true
+        gameGuideExitTimer?.invalidate()
+        gameGuideExitTimer = nil
+        gameGuideExitCountdown = 0
+        guard gameGuideExitCountdown > 0 else { return }
+        gameGuideExitTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.advanceGameGuideExitCountdown() }
+        }
+    }
+
+    func advanceGameGuideExitCountdown() {
+        gameGuideExitCountdown = max(0, gameGuideExitCountdown - 1)
+        if gameGuideExitCountdown == 0 {
+            gameGuideExitTimer?.invalidate()
+            gameGuideExitTimer = nil
+        }
+    }
+
+    func dismissGameGuide() {
+        guard isGameGuidePresented, gameGuideExitCountdown == 0 else { return }
+        isGameGuidePresented = false
+        hasCompletedInitialGameGuide = true
     }
 
     func startPrologue(resume: Bool = false) {
@@ -359,7 +423,8 @@ final class GameManager: ObservableObject {
         player.posture = .standing
         freeRoam = StudentFreeRoamState()
         prologuePauseReasons = []
-        prologuePerformanceMoments = []
+        isPrologueTutorialPresented = false
+        isChapterOneTransitionPresented = false
         isAccessibilityPanelPresented = false
         if resume == false || prologueState.prologueCompleted {
             prologueState = PrologueState()
@@ -476,8 +541,8 @@ final class GameManager: ObservableObject {
 
     func startFullNarrativeCampaign() {
         startGame()
-        isFullNarrativeRun = true
-        narrativeCampaign = NarrativeCampaign()
+        narrativeCampaign.start()
+        isFullNarrativeRun = false
         activeNarrativeMicroGame = nil
         narrativeBoundaryDwellSeconds = 0
         narrativeBoundaryPullbackCount = 0
@@ -486,7 +551,8 @@ final class GameManager: ObservableObject {
         activeRole = .regularStudent
         viewMode = .student
         player.posture = .seated
-        message = "先别急着找答案。转头、停留、听见，再决定要不要靠近。"
+        mouseLookEnabled = false
+        message = narrativeCampaign.currentMoment.goal
         transitionAudioScene(to: .classroom)
         saveNarrativeCampaign()
         presentScenePresentation(for: .classroom, subtitle: activeChapter.objective)
@@ -1517,43 +1583,46 @@ final class GameManager: ObservableObject {
 
     @discardableResult
     private func performKeyboardHotspotTarget(_ hotspot: NarrativeHotspot) -> Bool {
-        let dx = hotspot.x - narrativeCampaign.exploration.positionX
-        let dz = hotspot.z - narrativeCampaign.exploration.positionZ
-        let distance = hypot(dx, dz)
-        if distance <= hotspot.radius {
-            guard let interacted = narrativeCampaign.exploration.interact(with: [hotspot]) else { return false }
-            narrativeCampaign.recordNoteTraceDepartureClue(for: interacted.id)
-            if let choiceID = interacted.choiceID {
-                if let miniGame = narrativeCampaign.currentMoment.miniGame,
-                   narrativeCampaign.miniGameCompleted == false,
-                   narrativeCampaign.currentMoment.choices.contains(where: { $0.id == choiceID }) {
-                    presentNarrativeMicroGame(miniGame)
-                } else {
-                    applyNarrativeChoice(choiceID)
-                }
-            }
-            message = interacted.prompt
-            addAudioCue(
-                narrativeCampaign.chapter == .mirror ? .lights : .footstep,
-                direction: interacted.title,
-                intensity: 0.48,
-                note: interacted.prompt
-            )
-            let logKind = interacted.choiceID == nil ? "KEYBOARD_HOTSPOT" : "KEYBOARD_ACTION"
-            developerPlaytestLog.append("\(logKind) \(interacted.id)")
-            narrativeKeyboardStatus = "确认 \(interacted.title)"
-            saveNarrativeCampaign()
-            objectWillChange.send()
-            return true
-        }
-
-        narrativeCampaign.exploration.yaw = atan2(-dx, -dz)
-        moveNarrativeExploration(forward: 1, strafe: 0, deltaTime: 0.18)
-        let remaining = hypot(
+        var remaining = hypot(
             hotspot.x - narrativeCampaign.exploration.positionX,
             hotspot.z - narrativeCampaign.exploration.positionZ
         )
-        narrativeKeyboardStatus = "靠近 \(hotspot.title) · \(String(format: "%.1f", max(0, remaining - hotspot.radius)))m"
+        if remaining > hotspot.radius {
+            narrativeCampaign.exploration.yaw = atan2(
+                -(hotspot.x - narrativeCampaign.exploration.positionX),
+                -(hotspot.z - narrativeCampaign.exploration.positionZ)
+            )
+            narrativeCampaign.exploration.positionX = hotspot.x
+            narrativeCampaign.exploration.positionZ = hotspot.z
+            remaining = 0
+        }
+        guard remaining <= hotspot.radius,
+              let interacted = narrativeCampaign.exploration.interact(with: [hotspot]) else {
+            narrativeKeyboardStatus = "靠近 \(hotspot.title) · \(String(format: "%.1f", max(0, remaining - hotspot.radius)))m"
+            return true
+        }
+        narrativeCampaign.recordNoteTraceDepartureClue(for: interacted.id)
+        if let choiceID = interacted.choiceID {
+            if let miniGame = narrativeCampaign.currentMoment.miniGame,
+               narrativeCampaign.miniGameCompleted == false,
+               narrativeCampaign.currentMoment.choices.contains(where: { $0.id == choiceID }) {
+                presentNarrativeMicroGame(miniGame)
+            } else {
+                applyNarrativeChoice(choiceID)
+            }
+        }
+        message = interacted.prompt
+        addAudioCue(
+            narrativeCampaign.chapter == .mirror ? .lights : .footstep,
+            direction: interacted.title,
+            intensity: 0.48,
+            note: interacted.prompt
+        )
+        let logKind = interacted.choiceID == nil ? "KEYBOARD_HOTSPOT" : "KEYBOARD_ACTION"
+        developerPlaytestLog.append("\(logKind) \(interacted.id)")
+        narrativeKeyboardStatus = "确认 \(interacted.title)"
+        saveNarrativeCampaign()
+        objectWillChange.send()
         return true
     }
 
@@ -1892,25 +1961,7 @@ final class GameManager: ObservableObject {
             guard let self else { return }
             startFullNarrativeCampaign()
             mouseLookEnabled = false
-            developerPlaytestLog.append("START playable chapter 1")
-            let chapterOneInputs: [(CameraPose?, PlayerAction)] = [
-                (.left, .observe), (.right, .observe), (nil, .breathe),
-                (nil, .talk), (.desk, .observe), (nil, .leaveSeat)
-            ]
-            for (pose, action) in chapterOneInputs {
-                guard Task.isCancelled == false else { return }
-                let beforeState = playtestRouteStateSummary
-                let friction = playtestFrictionSummary
-                if let pose {
-                    setPose(pose)
-                    completeCurrentSpatialAudioDwellIfPossible()
-                }
-                execute(action)
-                resolveDeveloperAutoplayEventIfNeeded()
-                developerPlaytestLog.append("INPUT ch1 \(action.rawValue) -> \(chapterOneStep.rawValue)")
-                recordPlaytestRoute(actor: "开发者自动游玩", input: "第一章 \(action.rawValue)", beforeState: beforeState, friction: friction)
-                try? await Task.sleep(for: stepDelay)
-            }
+            developerPlaytestLog.append("START streamlined six-chapter narrative")
             while narrativeCampaign.isActive && narrativeCampaign.isComplete == false {
                 guard Task.isCancelled == false else { return }
                 developerAdvanceOneStep()
@@ -2808,6 +2859,20 @@ final class GameManager: ObservableObject {
 
     var prologueCurrentBeat: PrologueBeatID { prologueState.currentBeat }
 
+    var prologueAutoAdvanceSecondsRemaining: Int? {
+        guard let duration = prologueCurrentBeat.autoAdvanceDuration,
+              prologueCurrentBeat != .gateArrival else { return nil }
+        return max(0, Int(ceil(duration - prologueBeatElapsed)))
+    }
+
+    var canCompleteCurrentPrologueEarly: Bool {
+        isPrologueActive && isPrologueTutorialPresented == false && prologuePaused == false
+            && prologueCurrentBeat != .lookDownHall
+            && prologueCurrentBeat.autoAdvanceDuration != nil
+            && prologueCurrentBeat != .gateArrival
+            && prologueActionReady
+    }
+
     private func startPrologueTimer() {
         prologueTimer?.invalidate()
         prologueTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -2825,91 +2890,141 @@ final class GameManager: ObservableObject {
         guard isPrologueActive, prologuePaused == false, gameState == .playing else { return }
         prologueBeatElapsed += delta
         let beat = prologueState.currentBeat
-        updateProloguePerformance(for: beat)
-        switch beat {
-        case .gateArrival where prologueBeatElapsed >= 55:
-            completePrologueBeat(beat, source: .performance)
-        case .lookDownHall where prologueBeatElapsed >= 12,
-             .returnToSeat where prologueBeatElapsed >= 12,
-             .placeWater where prologueBeatElapsed >= 12:
-            completePrologueBeat(beat, source: .fallback)
-        case .studyHallRhythm where prologueBeatElapsed >= 135:
-            completePrologueBeat(beat, source: .performance)
-        case .noticeLinChe where prologueBeatElapsed >= 10,
-             .settleBreath where prologueBeatElapsed >= 10:
-            completePrologueBeat(beat, source: .fallback)
-        case .accessibility where prologueBeatElapsed >= 12:
-            completePrologueBeat(beat, source: .fallback)
-        case .bellBeforeClass where prologueBeatElapsed >= 55:
-            completePrologueBeat(beat, source: .performance)
-        default:
-            break
+        if beat == .studyHallRhythm { updateStudyHallPerformance() }
+        if let duration = beat.autoAdvanceDuration, prologueBeatElapsed >= duration {
+            let source: PrologueCompletionSource = (beat == .gateArrival || beat == .studyHallRhythm || beat == .bellBeforeClass)
+                ? .performance
+                : .fallback
+            completePrologueBeat(beat, source: source)
         }
     }
 
-    private func updateProloguePerformance(for beat: PrologueBeatID) {
-        switch beat {
-        case .gateArrival:
-            performPrologueMoment("gate.court", at: 8, message: "球场的声音正在收远。人群向亮灯的教学楼慢慢汇拢。", cue: .footstep, direction: "身后远处", intensity: 0.3)
-            performPrologueMoment("gate.schedule", at: 26, message: "门厅的晚自习安排已经贴好。方老师的名字在第三行。", cue: .paper, direction: "门厅近处", intensity: 0.22)
-            performPrologueMoment("gate.threshold", at: 43, message: "跨进楼门以后，白天还没收好的事，也跟着每个人一起进来了。", cue: .broadcast, direction: "楼道深处", intensity: 0.26)
-        case .studyHallRhythm:
-            performPrologueMoment("rhythm.teacher", at: 18, message: "方老师把手机扣在讲台边，又确认了一遍最后一排的空位。", cue: .teacherSigh, direction: "讲台", intensity: 0.24)
-            performPrologueMoment("rhythm.monitor", at: 44, message: "周予安把门带上，许栀弯腰捡起一支笔，轻轻放回别人桌边。", cue: .chair, direction: "右前方", intensity: 0.28)
-            performPrologueMoment("rhythm.class", at: 73, message: "有人写题，有人趴了一会儿又坐直。耳机被收进抽屉，咳嗽也压低了。", cue: .paper, direction: "教室四周", intensity: 0.34)
-            performPrologueMoment("rhythm.quiet", at: 103, message: "教室很安静。可安静，只说明大家学会了不发出声音。", cue: .lights, direction: "头顶", intensity: 0.2)
-        case .bellBeforeClass:
-            performPrologueMoment("bell.light", at: 18, message: "方老师把灯调亮了一点。林澈翻开书，停在其中一页。", cue: .paper, direction: "左侧近处", intensity: 0.26)
-            performPrologueMoment("bell.breath", at: 39, message: "铃声还没有到。整间教室像在共同等那半秒钟。", cue: .lights, direction: "头顶与走廊", intensity: 0.18)
+    private func updateStudyHallPerformance() {
+        let nextPhase: Int
+        switch prologueBeatElapsed {
+        case ..<6: nextPhase = 0
+        case ..<12: nextPhase = 1
+        case ..<19: nextPhase = 2
+        case ..<26: nextPhase = 3
+        default: nextPhase = 4
+        }
+        guard nextPhase != prologuePerformancePhase else { return }
+        prologuePerformancePhase = nextPhase
+        switch nextPhase {
+        case 1:
+            teacher.positionIndex = 0
+            message = "方老师把手机扣在讲台边，确认最后一排的座位。她没有说话，只在名单上停了一下。"
+            addAudioCue(.paper, direction: "讲台前方", intensity: 0.32, note: "名单翻过一页。")
+        case 2:
+            frontDoorOpen = false
+            message = "周予安核对完座位，把门轻轻带上。许栀弯腰捡起一支笔，递回旁边。"
+            addAudioCue(.knock, direction: "前门", intensity: 0.34, note: "门轴声和一句很轻的“给你”。")
+        case 3:
+            message = "有人写题，有人趴了一下又坐直。耳机被收进抽屉，咳嗽声压得很低。"
+            addAudioCue(.chair, direction: "教室四周", intensity: 0.38, note: "椅子、抽屉和笔尖构成晚自习开始前的声音。")
+        case 4:
+            message = "苏念从左到右扫过教室，没有在任何人身上停太久。林澈在左边坐下，把书翻到其中一页。"
+            addAudioCue(.paper, direction: "左侧近处", intensity: 0.3, note: "纸张摩擦后，环境声重新占满教室。")
         default:
             break
         }
-    }
-
-    private func performPrologueMoment(
-        _ id: String,
-        at time: TimeInterval,
-        message nextMessage: String,
-        cue: AudioCueKind,
-        direction: String,
-        intensity: Double
-    ) {
-        guard prologueBeatElapsed >= time, prologuePerformanceMoments.insert(id).inserted else { return }
-        message = nextMessage
-        addAudioCue(cue, direction: direction, intensity: intensity, note: nextMessage)
     }
 
     func updatePrologueDwell(delta: TimeInterval) {
         guard isPrologueActive, prologuePaused == false else { return }
         let beat = prologueState.currentBeat
-        let matches = (beat == .lookDownHall && (cameraPose == .right || abs(studentLookYaw) > 0.42))
-            || (beat == .noticeLinChe && (cameraPose == .left || studentLookYaw > 0.42))
+        let matches = beat == .noticeLinChe && (cameraPose == .left || studentLookYaw > 0.42)
         prologueDwell = matches ? prologueDwell + delta : 0
-        let required = beat == .noticeLinChe ? 1.0 : 1.2
-        if matches && prologueDwell >= required {
-            completePrologueBeat(beat, source: .player)
+        if matches && prologueDwell >= 1.0 {
+            prologueActionReady = true
+            message = "你已经认真看见了林澈的状态。按 C 可以提前结束这一步。"
         }
+    }
+
+    func updatePrologueLookExploration(isMoving: Bool, delta: TimeInterval) {
+        guard isPrologueActive, prologuePaused == false,
+              prologueCurrentBeat == .lookDownHall, isMoving else { return }
+        prologueLookExplorationElapsed = min(5, prologueLookExplorationElapsed + delta)
+        if prologueLookExplorationElapsed >= 5 {
+            completePrologueBeat(.lookDownHall, source: .player)
+        }
+    }
+
+    func completeCurrentPrologueEarly() {
+        guard canCompleteCurrentPrologueEarly else { return }
+        completePrologueBeat(prologueCurrentBeat, source: .player)
     }
 
     func confirmPrologueInteraction() {
         guard isPrologueActive, prologuePaused == false else { return }
         switch prologueState.currentBeat {
         case .placeWater:
-            completePrologueBeat(.placeWater, source: .player)
+            prologueActionReady = true
+            message = "水杯已经放在手边。按 C 可以提前结束这一步，也可以继续留在这里。"
         case .accessibility:
             acknowledgeAccessibilityTutorial(openSettings: false)
+        case .settleBreath:
+            prologueActionReady = true
+            message = "你完成了一次自我调整。按 C 可以提前结束这一步。"
+        case .returnToSeat:
+            confirmPrologueSeat()
         default:
             break
+        }
+    }
+
+    @discardableResult
+    func confirmPrologueSeat() -> Bool {
+        guard isPrologueActive, prologuePaused == false,
+              prologueCurrentBeat == .returnToSeat, freeRoam.isActive else { return false }
+        guard hypot(freeRoam.positionX - (-0.6), freeRoam.positionZ - 1.65) <= 0.72 else {
+            message = "还没有到自己的座位附近。"
+            return false
+        }
+        freeRoam = StudentFreeRoamState()
+        player.posture = .seated
+        studentLookYaw = 0
+        studentLookPitch = 0
+        cameraPose = .forward
+        prologueActionReady = true
+        message = "你已经坐回自己的位置。按 C 可以提前结束这一步。"
+        return true
+    }
+
+    func acknowledgeSettleBreathWithoutAction() {
+        guard isPrologueActive, prologueState.currentBeat == .settleBreath else { return }
+        prologueActionReady = true
+        message = "你决定先安静地坐一会儿。按 C 可以提前结束这一步。"
+    }
+
+    func presentCurrentPrologueTutorial() {
+        guard isPrologueActive, prologueCurrentBeat.tutorialStep != nil else { return }
+        isPrologueTutorialPresented = true
+        prologuePauseReasons.insert(.tutorial)
+    }
+
+    func dismissCurrentPrologueTutorial() {
+        guard isPrologueTutorialPresented else { return }
+        isPrologueTutorialPresented = false
+        prologuePauseReasons.remove(.tutorial)
+    }
+
+    func toggleCurrentPrologueTutorial() {
+        guard isPrologueActive, prologueCurrentBeat.tutorialStep != nil else { return }
+        if isPrologueTutorialPresented == false {
+            presentCurrentPrologueTutorial()
         }
     }
 
     func acknowledgeAccessibilityTutorial(openSettings: Bool) {
         guard isPrologueActive, prologueState.currentBeat == .accessibility else { return }
         if openSettings {
-            openAccessibilityPanel()
+            isAccessibilityPanelPresented = true
+            prologuePauseReasons.insert(.settings)
         } else {
             prologueState.accessibilityTutorialAcknowledged = true
-            completePrologueBeat(.accessibility, source: .player)
+            prologueActionReady = true
+            message = "你已经确认了辅助设置。按 C 可以提前结束这一步。"
         }
     }
 
@@ -2927,9 +3042,11 @@ final class GameManager: ObservableObject {
         prologuePauseReasons.remove(.settings)
         narrativePauseReasons.remove(.settings)
         saveAccessibilityPreferences()
+        applyAccessibilityPreferences()
         if isPrologueActive, prologueState.currentBeat == .accessibility {
             prologueState.accessibilityTutorialAcknowledged = true
-            completePrologueBeat(.accessibility, source: .player)
+            prologueActionReady = true
+            message = "辅助设置已确认。按 C 可以提前结束这一步。"
         }
     }
 
@@ -2978,15 +3095,15 @@ final class GameManager: ObservableObject {
         case .gateArrival:
             prologueState.openingViewed = true
         case .lookDownHall:
-            prologueState.lookTutorialCompleted = true
+            prologueState.lookTutorialCompleted = source == .player
         case .returnToSeat:
-            prologueState.movementTutorialCompleted = true
+            prologueState.movementTutorialCompleted = source == .player
             freeRoam = StudentFreeRoamState()
             player.posture = .seated
         case .placeWater:
-            prologueState.interactionTutorialCompleted = true
+            prologueState.interactionTutorialCompleted = source == .player
         case .accessibility:
-            prologueState.accessibilityTutorialAcknowledged = true
+            prologueState.accessibilityTutorialAcknowledged = source == .player
         default:
             break
         }
@@ -3005,13 +3122,24 @@ final class GameManager: ObservableObject {
     private func beginPrologueBeat(_ beat: PrologueBeatID) {
         prologueState.currentBeat = beat
         prologueBeatElapsed = 0
+        prologueLookExplorationElapsed = 0
+        prologueActionReady = false
+        prologueSeatNearby = false
         prologueDwell = 0
+        prologuePerformancePhase = 0
         cameraPose = .forward
         studentLookYaw = 0
         studentLookPitch = 0
         message = prologueMessage(for: beat)
+        isPrologueTutorialPresented = false
+        prologuePauseReasons.remove(.tutorial)
         switch beat {
+        case .lookDownHall:
+            // Step one teaches capture explicitly, so confirmation leaves the
+            // cursor released until the player presses the physical ~ key.
+            mouseLookEnabled = false
         case .returnToSeat:
+            mouseLookEnabled = true
             let now = Date()
             freeRoam = StudentFreeRoamState(isActive: true, positionX: 3.25, positionZ: 1.65, yaw: .pi / 2, pitch: 0, startedAt: now, endsAt: .distantFuture, hasExitedClassroom: false, isSideways: false, isSprinting: false, frontDoorOpen: true, rearDoorOpen: false)
             player.posture = .standing
@@ -3021,7 +3149,13 @@ final class GameManager: ObservableObject {
         default:
             break
         }
+        if beat == .studyHallRhythm || beat == .bellBeforeClass {
+            prologueActionReady = true
+        }
         addPrologueAudio(for: beat)
+        if beat.tutorialStep != nil {
+            presentCurrentPrologueTutorial()
+        }
     }
 
     private func finishPrologue() {
@@ -3030,30 +3164,19 @@ final class GameManager: ObservableObject {
         prologueState.prologueCompleted = true
         prologueState.completedBeats.insert(.bellBeforeClass)
         savePrologueProgress()
-        isPrologueActive = false
-        prologuePauseReasons = []
-        isAccessibilityPanelPresented = false
-        currentTurn = 1
-        maxTurns = settings.maxTurns
-        activeChapter = .silentClassroom
-        chapterOneStep = .observeLinChe
-        currentPhase = .observation
-        activeRole = .regularStudent
-        viewMode = .student
-        player = PlayerState()
-        configurePlayerForSelectedRole()
-        player.posture = .seated
-        teacher = makeTeacherState(for: activeRole)
-        selectedTeacherTargetID = classmates.max { lhs, rhs in lhs.stress < rhs.stress }?.id
-        teacher.classRisk = estimatedClassRisk
-        freeRoam = StudentFreeRoamState()
-        cameraPose = .forward
-        studentLookYaw = 0
-        studentLookPitch = 0
-        mouseLookEnabled = true
-        mouseLookCaptured = false
-        updatePerception()
+        startFullNarrativeCampaign()
         message = "预备铃的余音还在。晚自习开始了。"
+        isChapterOneTransitionPresented = true
+    }
+
+    func enterChapterOneAfterPrologue() {
+        isChapterOneTransitionPresented = false
+    }
+
+    func restartPrologueTutorial() {
+        startPrologue(resume: false)
+        // Re-enter at step 1 without replaying the seven-second exterior arrival.
+        completePrologueBeat(.gateArrival, source: .performance)
     }
 
     private func prologueMessage(for beat: PrologueBeatID) -> String {
@@ -3080,16 +3203,18 @@ final class GameManager: ObservableObject {
         case .noticeLinChe: addAudioCue(.paper, direction: "左侧近处", intensity: 0.3, note: "林澈把书翻到其中一页。")
         case .settleBreath: addAudioCue(.heartbeat, direction: "颅内", intensity: 0.22, note: "呼吸慢慢稳定下来。")
         case .accessibility: break
-        case .bellBeforeClass: addAudioCue(.bell, direction: "走廊远处", intensity: 0.58, note: "预备铃从走廊传来。")
+        case .bellBeforeClass: addAudioCue(.broadcast, direction: "走廊远处", intensity: 0.58, note: "预备铃从走廊传来。")
         }
     }
 
     private func savePrologueProgress() {
+        guard shouldStartAudioEngine else { return }
         guard let data = try? JSONEncoder().encode(prologueState) else { return }
         storage.set(data, forKey: prologueStoreKey)
     }
 
     private func saveAccessibilityPreferences() {
+        guard shouldStartAudioEngine else { return }
         guard let data = try? JSONEncoder().encode(accessibilityPreferences) else { return }
         storage.set(data, forKey: accessibilityStoreKey)
         if hasContinuableNarrativeSave {
@@ -3097,13 +3222,8 @@ final class GameManager: ObservableObject {
         }
     }
 
-    func updateAccessibilityPreferences(_ update: (inout AccessibilityPreferences) -> Void) {
-        update(&accessibilityPreferences)
-        accessibilityPreferencesDidChange()
-    }
-
-    func accessibilityPreferencesDidChange() {
-        audio.setVolumes(
+    func applyAccessibilityPreferences() {
+        audio.setMixVolumes(
             dialogue: accessibilityPreferences.dialogueVolume,
             ambience: accessibilityPreferences.ambienceVolume,
             cues: accessibilityPreferences.cueVolume
@@ -3114,6 +3234,11 @@ final class GameManager: ObservableObject {
         saveAccessibilityPreferences()
     }
 
+    func updateAccessibilityPreferences(_ update: (inout AccessibilityPreferences) -> Void) {
+        update(&accessibilityPreferences)
+        applyAccessibilityPreferences()
+    }
+
     private func loadPrologueProgress() {
         if let data = storage.data(forKey: prologueStoreKey),
            let saved = try? JSONDecoder().decode(PrologueState.self, from: data) {
@@ -3122,12 +3247,8 @@ final class GameManager: ObservableObject {
         if let data = storage.data(forKey: accessibilityStoreKey),
            let saved = try? JSONDecoder().decode(AccessibilityPreferences.self, from: data) {
             accessibilityPreferences = saved
+            applyAccessibilityPreferences()
         }
-        audio.setVolumes(
-            dialogue: accessibilityPreferences.dialogueVolume,
-            ambience: accessibilityPreferences.ambienceVolume,
-            cues: accessibilityPreferences.cueVolume
-        )
     }
 
     private func configurePlayerForSelectedRole() {
@@ -3384,6 +3505,9 @@ final class GameManager: ObservableObject {
         guard activeRole.isTeacher == false, freeRoam.isActive == false else { return }
         let previousPose = cameraPose
         cameraPose = pose
+        if isPrologueActive {
+            return
+        }
 
         switch pose {
         case .board:
@@ -3431,6 +3555,7 @@ final class GameManager: ObservableObject {
 
     func rotateStudentView(deltaX: Double, deltaY: Double) {
         guard case .playing = gameState, activeRole.isTeacher == false, isReturningToSeat == false else { return }
+        if isPrologueActive && prologuePaused { return }
         if isPrologueActive && prologueState.currentBeat.allowsLook == false { return }
         let previousPose = cameraPose
         let sensitivity = 0.006
@@ -3447,6 +3572,9 @@ final class GameManager: ObservableObject {
         let nextPose = cameraPoseFromLook(yaw: nextYaw, pitch: nextPitch)
         guard nextPose != previousPose else { return }
         cameraPose = nextPose
+        if isPrologueActive {
+            return
+        }
         applyRearLookRiskIfNeeded(previousPose: previousPose)
         chapterOneDwellFocus.resetForPose(nextPose)
         if freeRoam.isActive == false {
@@ -3545,6 +3673,7 @@ final class GameManager: ObservableObject {
 
     func moveStudentFreeRoam(forward: Double, strafe: Double, deltaTime: Double) {
         guard case .playing = gameState, freeRoam.isActive, activeRole.isTeacher == false, isReturningToSeat == false else { return }
+        if isPrologueActive && prologuePaused { return }
         if isPrologueActive && prologueState.currentBeat.allowsMovement == false { return }
         let baseSpeed = freeRoam.hasExitedClassroom ? 1.7 : 1.45
         let postureSpeed = freeRoam.isSideways ? baseSpeed * 0.58 : baseSpeed
@@ -3570,10 +3699,12 @@ final class GameManager: ObservableObject {
             player.stress = max(0, player.stress - 0.05)
         }
         freeRoam = nextFreeRoam
-        if isPrologueActive, prologueState.currentBeat == .returnToSeat,
-           hypot(nextFreeRoam.positionX - (-1.2), nextFreeRoam.positionZ - 1.65) <= 0.72 {
-            completePrologueBeat(.returnToSeat, source: .player)
-            return
+        if isPrologueActive, prologueState.currentBeat == .returnToSeat {
+            let wasNearby = prologueSeatNearby
+            prologueSeatNearby = hypot(nextFreeRoam.positionX - (-0.6), nextFreeRoam.positionZ - 1.65) <= 0.72
+            if prologueSeatNearby && wasNearby == false {
+                message = "你已经靠近自己的座位。按 E 入座。"
+            }
         }
         if nextFreeRoam.isSprinting && actualDistance > 0 {
             pendingSprintHunger += actualDistance * 0.18
@@ -3799,7 +3930,7 @@ final class GameManager: ObservableObject {
                 let x = Double(column) * 1.2 - 2.4
                 let deskZ = Double(row) * 1.45 - 2.25
                 let chairZ = deskZ + 0.55
-                obstacles.append(expandedObstacle(centerX: x, centerZ: deskZ, width: 0.78, length: 0.52))
+                obstacles.append(expandedObstacle(centerX: x, centerZ: deskZ, width: 0.70, length: 0.50))
                 obstacles.append(expandedObstacle(centerX: x, centerZ: chairZ, width: 0.48, length: 0.42))
             }
         }
@@ -4030,7 +4161,8 @@ final class GameManager: ObservableObject {
         if isPrologueActive {
             if prologueState.currentBeat == .settleBreath, action == .breathe {
                 addAudioCue(.heartbeat, direction: "颅内", intensity: 0.2, note: "呼吸慢下来，教室的声音重新有了边界。")
-                completePrologueBeat(.settleBreath, source: .player)
+                prologueActionReady = true
+                message = "呼吸慢了下来。按 C 可以提前结束这一步，也可以继续感受片刻。"
             }
             return
         }
@@ -6061,14 +6193,14 @@ final class GameManager: ObservableObject {
 
         switch chapterOneStep {
         case .observeLinChe where action == .observe && cameraPose == .left:
-            guard chapterOneLocatedAudioSteps.contains(.observeLinChe) else {
+            guard isFullNarrativeRun == false || chapterOneLocatedAudioSteps.contains(.observeLinChe) else {
                 message += " 你还只是看向左边，先听清翻书声停在哪里。"
                 return
             }
             collectChapterClue(.linChePage, messageSuffix: "林澈的书停在同一页太久了，笔尖也没有动。")
             advanceChapterOne(to: .locateHiddenSound, cue: "右侧传来一声很轻的鼻息，又被翻书声盖住。")
         case .locateHiddenSound where action == .observe && cameraPose == .right:
-            guard chapterOneLocatedAudioSteps.contains(.locateHiddenSound) else {
+            guard isFullNarrativeRun == false || chapterOneLocatedAudioSteps.contains(.locateHiddenSound) else {
                 message += " 你还没有把那一下鼻息和方向对上。"
                 return
             }
@@ -6079,13 +6211,25 @@ final class GameManager: ObservableObject {
             addMonologue("我也在这间教室里。先让自己缓一下，才听得清别人。", intensity: 0.64)
             advanceChapterOne(to: .approachLinChe, cue: "林澈抬头看了一眼门口，开始把笔收回笔袋。")
         case .approachLinChe where action == .talk || action == .note:
-            presentChapterOneLinCheDialogueIfNeeded()
+            if isFullNarrativeRun {
+                presentChapterOneLinCheDialogueIfNeeded()
+            } else {
+                player.helpedClassmate = true
+                addMonologue("他说没事，可那句话落得太快了，像是早就练习过。", intensity: 0.62)
+                addAudioCue(.paper, direction: "桌面右侧", intensity: 0.58, note: "前排同学起身时，一张折过的纸滑到桌边。")
+                advanceChapterOne(to: .inspectNote, cue: "铃声响起，一张纸从桌边滑了下来。")
+            }
         case .inspectNote where (action == .observe && cameraPose == .desk) || action == .note:
-            guard chapterOneLocatedAudioSteps.contains(.inspectNote) || action == .note else {
+            guard isFullNarrativeRun == false || chapterOneLocatedAudioSteps.contains(.inspectNote) || action == .note else {
                 message += " 纸边刚才响在桌面右侧，先把声源和纸片对上。"
                 return
             }
-            confirmChapterOneNotePickup(source: .player)
+            if isFullNarrativeRun {
+                confirmChapterOneNotePickup(source: .player)
+            } else {
+                collectChapterClue(.unsignedNote, messageSuffix: "纸条没有署名：心里很难受，但我不知道找谁说。")
+                advanceChapterOne(to: .followLinChe, cue: "你再抬头时，林澈已经走到教室门口。")
+            }
         default:
             message += " 这还不能确认当前目标。"
         }
@@ -6923,19 +7067,13 @@ final class GameManager: ObservableObject {
 
     private func makeClassmates() -> [Classmate] {
         let names = ["林澈", "周予安", "江越", "陈言", "许栀", "何屿", "唐宁", "沈星", "顾言", "叶舟", "韩夏", "白辰", "陆遥", "秦一", "苏禾", "姜南", "程川", "宋也", "黎昕"]
-        let authoredSeats: [(Int, Int)] = [(2, 0), (0, 1), (4, 3), (0, 2), (1, 2)]
-        let remainingSeats = (0..<5).flatMap { row in
-            (0..<4).compactMap { column -> (Int, Int)? in
-                let seat = (row, column)
-                guard seat != (2, 1), authoredSeats.contains(where: { $0 == seat }) == false else { return nil }
-                return seat
-            }
-        }
-        let seats = authoredSeats + remainingSeats
         var result: [Classmate] = []
-        for (id, seat) in seats.enumerated() {
+        var id = 0
+        for row in 0..<5 {
+            for column in 0..<4 {
+                if row == 2 && column == 1 { continue }
                 let name = names[id % names.count]
-                let isDeskmate = seat.0 == 2 && (seat.1 == 0 || seat.1 == 2)
+                let isDeskmate = row == 2 && (column == 0 || column == 2)
                 let profile = classmateProfile(id: id)
                 let memory = classmateMemory[id]
                 let baseRelationship = isDeskmate ? 42 : Double.random(in: 10...45)
@@ -6943,7 +7081,7 @@ final class GameManager: ObservableObject {
                 result.append(Classmate(
                     id: id,
                     name: name,
-                    seat: seat,
+                    seat: (row, column),
                     profile: profile,
                     support: Double.random(in: 16...70),
                     stress: (baseStress + (memory?.stressEcho ?? 0)).clamped(to: 8...100),
@@ -6952,6 +7090,8 @@ final class GameManager: ObservableObject {
                     hasSharedTruth: memory?.sharedTruth ?? false,
                     suspicionOfPlayer: memory?.suspicionCarry ?? 0
                 ))
+                id += 1
+            }
         }
         return result
     }

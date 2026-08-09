@@ -1,9 +1,17 @@
+import AppKit
 import SwiftUI
 
 @main
 struct LateStudySimulatorApp: App {
     @StateObject private var game = GameManager()
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        NSApplication.shared.setActivationPolicy(.regular)
+        DispatchQueue.main.async {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+    }
 
     var body: some Scene {
         WindowGroup("晚自习模拟器 3D") {
