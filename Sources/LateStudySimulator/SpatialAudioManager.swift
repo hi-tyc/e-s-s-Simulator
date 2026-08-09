@@ -184,6 +184,10 @@ final class SpatialAudioManager {
         updateAmbientLoopVolumes(classroomNoise: Double(targetAmbientNoise))
     }
 
+    func setMixVolumes(dialogue: Double, ambience: Double, cues: Double) {
+        setVolumes(dialogue: dialogue, ambience: ambience, cues: cues)
+    }
+
     private func configureEngine() {
         if let environment {
             engine.attach(environment)

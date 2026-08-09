@@ -1850,8 +1850,9 @@ struct MirrorMicroGameInputFeedbackModel: Equatable {
         switch miniGame {
         case .trace: return "目标：第 \(min(progress + 1, miniGame.requiredInteractions)) 段线"
         case .melody:
-            let sequence = ["风", "灯", "笔", "夜"]
-            return "目标：第 \(min(progress + 1, sequence.count)) 拍 \(sequence[min(progress, sequence.count - 1)])"
+            let order = min(progress, MirrorMelodyPlaybackModel.sequence.count - 1)
+            let padIndex = MirrorMelodyPlaybackModel.sequence[order]
+            return "目标：第 \(order + 1) 拍 \(MirrorMelodyPlaybackModel.labels[padIndex])"
         case .erase: return "目标：再擦 \(max(0, miniGame.requiredInteractions - touchedCount)) 句"
         }
     }
@@ -2494,17 +2495,16 @@ enum AudioCueKind: String, CaseIterable {
     case lights = "灯管"
     case heartbeat = "心跳"
     case broadcast = "广播"
-    case bell = "铃声"
     case knock = "敲门"
     case stomach = "肚子"
     case wrapper = "包装纸"
     case teacherCough = "咳嗽"
     case teacherSigh = "叹气"
+    case bell = "铃声"
 }
 
 struct AudioCue: Identifiable {
     let id = UUID()
-    let createdAt = Date()
     let turn: Int
     let kind: AudioCueKind
     let direction: String

@@ -13,6 +13,52 @@ enum PrologueBeatID: String, Codable, CaseIterable {
 
     var mainTask: String { "熟悉晚自习开始前的教室" }
 
+    static let tutorialBeats: [PrologueBeatID] = [
+        .lookDownHall, .returnToSeat, .placeWater, .studyHallRhythm,
+        .noticeLinChe, .settleBreath, .accessibility, .bellBeforeClass
+    ]
+
+    var tutorialStep: Int? {
+        Self.tutorialBeats.firstIndex(of: self).map { $0 + 1 }
+    }
+
+    var autoAdvanceDuration: TimeInterval? {
+        switch self {
+        case .gateArrival: return 7
+        case .lookDownHall: return nil
+        case .returnToSeat: return 50
+        case .placeWater: return 20
+        case .studyHallRhythm: return 30
+        case .noticeLinChe: return 15
+        case .settleBreath: return 15
+        case .accessibility: return 50
+        case .bellBeforeClass: return 7
+        }
+    }
+
+    var tutorialInstruction: String {
+        switch self {
+        case .gateArrival:
+            return "正在进入教学楼。"
+        case .lookDownHall:
+            return "现在让我们熟悉如何控制视角。移动鼠标即可控制转动视角，按下 ～ 键即可释放鼠标，再按一次恢复控制。你的鼠标现在是释放状态，需要先按 ～ 获取控制。请环视周围，累计移动视角 5 秒；视角不动时计时会暂停。此步骤不能用 C 跳过。"
+        case .returnToSeat:
+            return "使用 WASD 进行移动，鼠标控制方向。\n\n按住 Shift 可以侧身行走，碰撞体积更小，但是走得会慢；按住 Control 可以快速奔跑，会增加一点饥饿值。\n\n请走回第三排自己的座位，靠近座位后按 E 入座。完成入座前不能用 C 跳过；暂时不操作也会在倒计时结束后自动继续。"
+        case .placeWater:
+            return "将视角移向桌面，看到可互动目标后按空格键，把水杯放到桌上。放好后会解锁 C，可以提前结束剩余倒计时。"
+        case .studyHallRhythm:
+            return "留在座位观察教室。你仍可移动鼠标环顾四周，也可以按 ～ 键暂时释放鼠标。"
+        case .noticeLinChe:
+            return "向左转动视角，找到林澈并稍作停留。先观察，不需要立刻作出判断。"
+        case .settleBreath:
+            return "点击“深呼吸”完成一次自我调整，也可以选择先坐一会儿。完成后会解锁 C。照顾自己和观察同学同样重要。"
+        case .accessibility:
+            return "你可以调整字幕、声音、动态效果和输入方式。点击“调整体验”，或选择“继续”；确认后会解锁 C。"
+        case .bellBeforeClass:
+            return "自由观察铃响前的教室。倒计时结束后序章会自动进入第一章。"
+        }
+    }
+
     var currentGoal: String {
         switch self {
         case .gateArrival: return "走进教学楼"
@@ -43,7 +89,7 @@ enum PrologueBeatID: String, Codable, CaseIterable {
 
     var allowsLook: Bool {
         switch self {
-        case .lookDownHall, .studyHallRhythm, .noticeLinChe, .bellBeforeClass: return true
+        case .lookDownHall, .returnToSeat, .studyHallRhythm, .noticeLinChe, .bellBeforeClass: return true
         default: return false
         }
     }
@@ -179,7 +225,7 @@ struct PrologueLookTargetSignal: Equatable {
 }
 
 struct PrologueGateArrivalSignal: Equatable {
-    static let duration: Double = 55
+    static let duration: Double = PrologueBeatID.gateArrival.autoAdvanceDuration ?? 7
     static let stepCount = 7
 
     var isVisible: Bool
@@ -227,5 +273,6 @@ enum PrologueCompletionSource: String, Codable {
 enum ProloguePauseReason: String, Hashable {
     case manual
     case settings
+    case tutorial
     case appInactive
 }

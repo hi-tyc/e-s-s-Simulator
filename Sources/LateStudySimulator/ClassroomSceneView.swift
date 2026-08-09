@@ -1807,43 +1807,94 @@ final class ClassroomCoordinator {
     private func makeMirrorStage() -> SCNNode {
         let root = makeStageShell(
             name: "narrativeStage_\(NarrativeChapter.mirror.rawValue)",
-            floor: NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.14, alpha: 1),
-            wall: NSColor(calibratedRed: 0.1, green: 0.08, blue: 0.16, alpha: 1),
-            light: NSColor(calibratedRed: 0.46, green: 0.32, blue: 0.78, alpha: 1)
+            floor: NSColor(calibratedRed: 0.075, green: 0.09, blue: 0.11, alpha: 1),
+            wall: NSColor(calibratedRed: 0.09, green: 0.105, blue: 0.13, alpha: 1),
+            light: NSColor(calibratedRed: 0.48, green: 0.7, blue: 0.82, alpha: 1)
         )
-        for z in stride(from: -5.6, through: 5.4, by: 1.1) {
-            root.addChildNode(box(width: 7.2, height: 0.025, length: 0.035, color: NSColor(calibratedRed: 0.3, green: 0.2, blue: 0.48, alpha: 1), position: SCNVector3(0, 0.025, Float(z))))
+        let guideColor = NSColor(calibratedRed: 0.3, green: 0.82, blue: 0.96, alpha: 1)
+        for index in 0..<7 {
+            let z = 3.75 - Float(index) * 0.88
+            let guide = box(
+                width: 0.72 - CGFloat(index) * 0.045,
+                height: 0.022,
+                length: 0.16,
+                color: guideColor.withAlphaComponent(0.62),
+                position: SCNVector3(0, 0.028, z)
+            )
+            guide.name = "mirrorFloorGuide_\(index)"
+            guide.geometry?.firstMaterial?.emission.contents = guideColor
+            guide.geometry?.firstMaterial?.emission.intensity = 0.32 + CGFloat(index) * 0.055
+            root.addChildNode(guide)
         }
 
-        let mirrorGeometry = SCNBox(width: 3.5, height: 2.65, length: 0.08, chamferRadius: 0.04)
+        let mirrorGeometry = SCNBox(width: 4.55, height: 2.9, length: 0.08, chamferRadius: 0.035)
         let mirror = SCNMaterial()
-        mirror.diffuse.contents = NSColor(calibratedRed: 0.12, green: 0.16, blue: 0.24, alpha: 1)
-        mirror.metalness.contents = 0.88
-        mirror.roughness.contents = 0.08
+        mirror.diffuse.contents = NSColor(calibratedRed: 0.18, green: 0.25, blue: 0.31, alpha: 1)
+        mirror.emission.contents = NSColor(calibratedRed: 0.08, green: 0.24, blue: 0.34, alpha: 1)
+        mirror.emission.intensity = 0.22
+        mirror.metalness.contents = 0.94
+        mirror.roughness.contents = 0.035
         mirror.reflective.contents = hallLightingImage
         mirrorGeometry.firstMaterial = mirror
         let mirrorNode = SCNNode(geometry: mirrorGeometry)
         mirrorNode.name = "mirrorSurface"
-        mirrorNode.position = SCNVector3(0, 1.45, -3.25)
+        mirrorNode.position = SCNVector3(0, 1.58, -3.08)
         root.addChildNode(mirrorNode)
 
-        let glowColors = [
-            NSColor(calibratedRed: 0.28, green: 0.68, blue: 1.0, alpha: 1),
-            NSColor(calibratedRed: 0.72, green: 0.35, blue: 0.92, alpha: 1),
-            NSColor(calibratedRed: 0.32, green: 0.88, blue: 0.64, alpha: 1)
-        ]
-        for (index, x) in [-1.55, 0.0, 1.55].enumerated() {
-            let beacon = sphere(radius: 0.22, color: glowColors[index], position: SCNVector3(Float(x), 1.25 + Float(index) * 0.22, -2.15))
-            beacon.name = index == 1 ? "stagePulse" : "mirrorBeacon_\(index)"
-            if index == 1 { beacon.name = "stageFocus" }
-            beacon.geometry?.firstMaterial?.emission.contents = glowColors[index]
-            beacon.runAction(.repeatForever(.sequence([
-                .moveBy(x: 0, y: 0.12, z: 0, duration: 1.1 + Double(index) * 0.18),
-                .moveBy(x: 0, y: -0.12, z: 0, duration: 1.1 + Double(index) * 0.18)
-            ])))
-            root.addChildNode(beacon)
+        let frameColor = NSColor(calibratedRed: 0.72, green: 0.77, blue: 0.8, alpha: 1)
+        let frameGlow = NSColor(calibratedRed: 0.28, green: 0.78, blue: 0.96, alpha: 1)
+        for (index, frame) in [
+            box(width: 4.88, height: 0.15, length: 0.16, color: frameColor, position: SCNVector3(0, 3.1, -3.0)),
+            box(width: 4.88, height: 0.15, length: 0.16, color: frameColor, position: SCNVector3(0, 0.06, -3.0)),
+            box(width: 0.15, height: 3.18, length: 0.16, color: frameColor, position: SCNVector3(-2.36, 1.58, -3.0)),
+            box(width: 0.15, height: 3.18, length: 0.16, color: frameColor, position: SCNVector3(2.36, 1.58, -3.0))
+        ].enumerated() {
+            frame.name = index == 0 ? "stageFocus" : "mirrorBeacon_\(index)"
+            frame.geometry?.firstMaterial?.metalness.contents = 0.82
+            frame.geometry?.firstMaterial?.roughness.contents = 0.18
+            frame.geometry?.firstMaterial?.emission.contents = frameGlow
+            frame.geometry?.firstMaterial?.emission.intensity = 0.18
+            root.addChildNode(frame)
         }
-        root.addChildNode(makeText("看见  听见  陪伴", size: 0.105, color: NSColor(calibratedRed: 0.72, green: 0.82, blue: 1, alpha: 1), position: SCNVector3(-1.65, 2.95, -3.18)))
+
+        // Receding lines inside the glass make the surface read as an impossible reflected corridor.
+        for index in 0..<4 {
+            let inset = CGFloat(index) * 0.34
+            let lineColor = frameGlow.withAlphaComponent(0.38 - CGFloat(index) * 0.06)
+            let y = 0.34 + Float(index) * 0.18
+            let width = 3.9 - inset * 2
+            let top = box(width: width, height: 0.018, length: 0.018, color: lineColor, position: SCNVector3(0, 2.82 - Float(index) * 0.18, -2.985))
+            let bottom = box(width: width, height: 0.018, length: 0.018, color: lineColor, position: SCNVector3(0, y, -2.985))
+            for line in [top, bottom] {
+                line.geometry?.firstMaterial?.emission.contents = frameGlow
+                line.geometry?.firstMaterial?.emission.intensity = 0.14
+                root.addChildNode(line)
+            }
+        }
+
+        let thresholdGeometry = SCNTorus(ringRadius: 0.72, pipeRadius: 0.035)
+        let thresholdMaterial = SCNMaterial()
+        thresholdMaterial.diffuse.contents = frameGlow
+        thresholdMaterial.emission.contents = frameGlow
+        thresholdMaterial.emission.intensity = 0.9
+        thresholdMaterial.blendMode = .add
+        thresholdGeometry.firstMaterial = thresholdMaterial
+        let threshold = SCNNode(geometry: thresholdGeometry)
+        threshold.name = "mirrorThresholdBeacon"
+        threshold.eulerAngles.x = .pi / 2
+        threshold.position = SCNVector3(0, 0.045, -2.1)
+        threshold.runAction(.repeatForever(.sequence([
+            .scale(to: 1.08, duration: 0.8),
+            .scale(to: 0.92, duration: 0.8)
+        ])))
+        root.addChildNode(threshold)
+
+        let entranceLabel = makeText("镜 面 入 口", size: 0.11, color: NSColor(calibratedRed: 0.76, green: 0.92, blue: 1, alpha: 1), position: SCNVector3(-0.58, 0.24, -2.97))
+        entranceLabel.name = "mirrorEntranceLabel"
+        entranceLabel.geometry?.firstMaterial?.emission.contents = frameGlow
+        entranceLabel.geometry?.firstMaterial?.emission.intensity = 0.45
+        root.addChildNode(entranceLabel)
+
         root.addChildNode(makeMirrorPressureRig())
         root.addChildNode(makeMirrorRouteLightsRig())
         return root
@@ -1983,9 +2034,9 @@ final class ClassroomCoordinator {
         let root = SCNNode()
         root.name = "mirrorRouteLightsRig"
         let positions: [SCNVector3] = [
-            SCNVector3(-1.18, 2.18, -2.42),
-            SCNVector3(0, 2.36, -2.42),
-            SCNVector3(1.18, 2.18, -2.42)
+            SCNVector3(-1.18, 2.18, -2.94),
+            SCNVector3(0, 2.36, -2.94),
+            SCNVector3(1.18, 2.18, -2.94)
         ]
         let labels = ["草稿", "旋律", "擦痕"]
 
@@ -1995,7 +2046,7 @@ final class ClassroomCoordinator {
                 height: 0.026,
                 length: 0.026,
                 color: NSColor(calibratedRed: 0.82, green: 0.68, blue: 0.32, alpha: 1),
-                position: SCNVector3((positions[index].x + positions[index + 1].x) / 2, (positions[index].y + positions[index + 1].y) / 2, -2.42)
+                position: SCNVector3((positions[index].x + positions[index + 1].x) / 2, (positions[index].y + positions[index + 1].y) / 2, -2.94)
             )
             bridge.name = "mirrorRouteBridge_\(index)"
             bridge.eulerAngles.z = index == 0 ? -0.15 : 0.15
@@ -2006,7 +2057,7 @@ final class ClassroomCoordinator {
         }
 
         for (index, position) in positions.enumerated() {
-            let light = sphere(radius: 0.17, color: NSColor(calibratedRed: 0.34, green: 0.3, blue: 0.48, alpha: 1), position: position)
+            let light = sphere(radius: 0.13, color: NSColor(calibratedRed: 0.34, green: 0.3, blue: 0.48, alpha: 1), position: position)
             light.name = "mirrorRouteLight_\(index)"
             light.opacity = 0.28
             light.geometry?.firstMaterial?.emission.contents = NSColor(calibratedRed: 0.34, green: 0.3, blue: 0.48, alpha: 1)
@@ -2708,7 +2759,7 @@ final class ClassroomCoordinator {
         updatePrologueGateArrivalPath(game: game)
 
         if game.prologueCurrentBeat == .gateArrival, game.accessibilityPreferences.reduceMotion == false {
-            let progress = (game.prologueBeatElapsed / 55).clamped(to: 0...1)
+            let progress = (game.prologueBeatElapsed / PrologueGateArrivalSignal.duration).clamped(to: 0...1)
             let eased = progress * progress * (3 - 2 * progress)
             SCNTransaction.begin()
             SCNTransaction.disableActions = true
@@ -2743,14 +2794,14 @@ final class ClassroomCoordinator {
             return
         }
 
-        let elapsed = game.prologueBeatElapsed
-        teacherNode.position = elapsed < 28 ? SCNVector3(-0.35, 0.05, -4.25) : SCNVector3(0, 0.05, -4.25)
+        let phase = game.prologuePerformancePhase
+        teacherNode.position = phase == 0 ? SCNVector3(-0.35, 0.05, -4.25) : SCNVector3(0, 0.05, -4.25)
         teacherNode.opacity = 0.92
 
         restoreAuthoredClassmatePositions(game.classmates)
-        if let monitor = classmateNodes[1], let mate = game.classmates.first(where: { $0.id == 1 }), elapsed < 56 {
+        if let monitor = classmateNodes[1], let mate = game.classmates.first(where: { $0.id == 1 }), phase <= 1 {
             let target = classmateScenePosition(seat: mate.seat)
-            let progress = ((elapsed - 20) / 32).clamped(to: 0...1)
+            let progress = ((game.prologueBeatElapsed - 6) / 6).clamped(to: 0...1)
             let targetX = Double(target.x)
             let targetZ = Double(target.z)
             let animatedX = 3.45 + (targetX - 3.45) * progress
@@ -2758,11 +2809,11 @@ final class ClassroomCoordinator {
             monitor.position = SCNVector3(Float(animatedX), Float(target.y), Float(animatedZ))
         }
         if let xuZhi = classmateNodes[4] {
-            let bend = elapsed >= 44 && elapsed < 61 ? 0.82 : 1.0
+            let bend = phase == 2 ? 0.82 : 1.0
             xuZhi.scale = SCNVector3(1, Float(bend), 1)
         }
         if let linChe = classmateNodes[0] {
-            linChe.opacity = CGFloat(((elapsed - 94) / 20).clamped(to: 0...1))
+            linChe.opacity = phase >= 4 ? 1 : 0
         }
     }
 
@@ -3249,6 +3300,18 @@ final class ClassroomCoordinator {
         if isMouseLookToggle(event) {
             return
         }
+        if Self.isTutorialToggle(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers) {
+            if isDown && event.isARepeat == false {
+                currentGame?.toggleCurrentPrologueTutorial()
+            }
+            return
+        }
+        if Self.isCompleteTutorialKey(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers) {
+            if isDown && event.isARepeat == false {
+                currentGame?.completeCurrentPrologueEarly()
+            }
+            return
+        }
         if isDown,
            event.isARepeat == false,
            let game = currentGame,
@@ -3264,7 +3327,9 @@ final class ClassroomCoordinator {
         }
         if event.keyCode == 14 {
             if isDown && event.isARepeat == false {
-                if currentGame?.narrativeCampaign.isActive == true {
+                if currentGame?.confirmPrologueSeat() == true {
+                    return
+                } else if currentGame?.narrativeCampaign.isActive == true {
                     currentGame?.interactNarrativeHotspot()
                 } else {
                     currentGame?.interactWithNearbyDoor()
@@ -3325,7 +3390,9 @@ final class ClassroomCoordinator {
     }
 
     private func tickMovement() {
+        let isLooking = pendingMouseDeltaX != 0 || pendingMouseDeltaY != 0
         applyPendingMouseLook()
+        currentGame?.updatePrologueLookExploration(isMoving: isLooking, delta: 1.0 / 60.0)
         currentGame?.updatePrologueDwell(delta: 1.0 / 60.0)
         guard let game = currentGame else {
             lastMovementTick = Date()
@@ -4902,7 +4969,6 @@ final class ClassroomCoordinator {
     private func updateDeskState(game: GameManager) {
         let shouldShowSeatedProps = game.viewMode == .student && game.player.posture == .seated && game.freeRoam.isActive == false
         playerSeatedPropsNode.isHidden = shouldShowSeatedProps == false
-        scene.rootNode.childNode(withName: "playerGroundedChair", recursively: true)?.isHidden = shouldShowSeatedProps
         guard shouldShowSeatedProps else {
             rightHandNode.removeAction(forKey: "write_homework")
             homeworkSheetNode.removeAction(forKey: "paper_focus")
@@ -6523,6 +6589,9 @@ final class ClassroomCoordinator {
 
     var playerGroundedChairLegCount: Int {
         guard let chair = scene.rootNode.childNode(withName: "playerGroundedChair", recursively: true) else { return 0 }
+        if chair.childNode(withName: "photorealChair", recursively: true) != nil {
+            return 4
+        }
         return chair.childNodes.filter { $0.name?.hasPrefix("chairLeg_") == true }.count
     }
 

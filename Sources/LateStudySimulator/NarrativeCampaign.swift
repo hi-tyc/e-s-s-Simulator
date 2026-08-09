@@ -1673,15 +1673,18 @@ struct NarrativeCampaign: Codable, Equatable {
             statusLine = clueCount > 0 ? "\(clueCount) 条线索被看见" : "等待第一条线索"
             signalStrength = min(1, max(0.18, Double(clueCount) / 5.0))
         case .mirror:
-            if mirrorDissolveProgress >= 1 {
+            if selfCared {
+                statusLine = "苏念停下来照顾自己"
+                signalStrength = 0.86
+            } else if mirrorDissolveProgress >= 1 {
                 statusLine = "镜面已经停下"
                 signalStrength = 0.92
             } else if mirrorDissolveProgress > 0 {
                 statusLine = "镜面正在褪色"
                 signalStrength = 0.82
             } else {
-                statusLine = selfCared ? "苏念停下来照顾自己" : "镜面还在放大压力"
-                signalStrength = selfCared ? 0.86 : 0.36
+                statusLine = "镜面还在放大压力"
+                signalStrength = 0.36
             }
         case .noteTrace:
             statusLine = companionID.isEmpty ? "还没有同行者" : "\(companionID)加入同行"
@@ -4696,7 +4699,7 @@ struct NarrativeCampaignView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [campaign.chapter.atmosphere.opacity(0.3), .black.opacity(0.28)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Color.black.opacity(0.16)
                 .ignoresSafeArea()
 
             if campaign.isComplete {
@@ -4707,11 +4710,11 @@ struct NarrativeCampaignView: View {
                         header
                         Spacer(minLength: 8)
                         HStack {
-                            if proxy.size.width >= 1_120 {
-                                Spacer(minLength: proxy.size.width * 0.35)
+                            if proxy.size.width >= 900 {
+                                Spacer(minLength: proxy.size.width * 0.32)
                             }
                             momentCard
-                                .frame(maxWidth: proxy.size.width >= 1_120 ? 640 : 760)
+                                .frame(maxWidth: narrativeCardWidth(for: proxy.size.width))
                         }
                         Spacer(minLength: 8)
                         footer
@@ -4745,7 +4748,7 @@ struct NarrativeCampaignView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(campaign.chapter.title)
@@ -4765,10 +4768,6 @@ struct NarrativeCampaignView: View {
                             .padding(.vertical, 6)
                             .background(.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 7))
                     }
-                    if game.accessibilityPreferences.keyboardAlternativeInput,
-                       let target = game.focusedNarrativeKeyboardTarget {
-                        keyboardTargetChip(target, compact: true)
-                    }
                     Text(campaign.progressText)
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.68))
@@ -4785,11 +4784,28 @@ struct NarrativeCampaignView: View {
                     .help("暂停")
                 }
             }
-            NarrativeRouteRailView(campaign: campaign)
-            NarrativeSupportWeatherView(campaign: campaign)
+            ProgressView(value: overallProgress)
+                .tint(campaign.chapter.atmosphere)
         }
-        .padding(16)
+        .padding(14)
         .narrativeGlassPanel(cornerRadius: 12, tint: campaign.chapter.atmosphere.opacity(0.35))
+    }
+
+    private var overallProgress: Double {
+        let chapterBase = Double(campaign.chapter.rawValue - 1)
+        let momentCount = max(1, NarrativeCampaign.moments(for: campaign.chapter).count)
+        let chapterProgress = Double(campaign.momentIndex) / Double(momentCount)
+        return ((chapterBase + chapterProgress) / Double(NarrativeChapter.allCases.count)).clamped(to: 0...1)
+    }
+
+    private func narrativeCardWidth(for availableWidth: CGFloat) -> CGFloat {
+        guard availableWidth >= 900 else { return 760 }
+        // The mirror is the chapter's first playable object. Keep its full silhouette
+        // visible on the left instead of obscuring it with a generic dialogue panel.
+        if campaign.chapter == .mirror {
+            return 460
+        }
+        return 640
     }
 
     private var momentCard: some View {
@@ -4808,21 +4824,19 @@ struct NarrativeCampaignView: View {
                 .lineSpacing(7)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let impact = campaign.activeChoiceImpact {
+            let mirrorConsequence = MirrorDialogueConsequenceModel.derive(from: campaign)
+            if let impact = campaign.activeChoiceImpact,
+               shouldShowChoiceImpact(impact),
+               mirrorConsequence.isActive == false {
                 NarrativeChoiceImpactBannerView(impact: impact, tint: campaign.chapter.atmosphere)
             }
 
-            let mirrorConsequence = MirrorDialogueConsequenceModel.derive(from: campaign)
             if mirrorConsequence.isActive {
                 MirrorDialogueConsequenceView(consequence: mirrorConsequence, tint: campaign.chapter.atmosphere)
             }
 
             if campaign.chapter == .mirror {
                 MirrorLightProgressView(campaign: campaign)
-            }
-
-            if campaign.chapter == .noteTrace {
-                ChapterThreeInvestigationView(campaign: campaign)
             }
 
             if let miniGame = moment.miniGame {
@@ -4993,6 +5007,13 @@ struct NarrativeCampaignView: View {
         return (miniGame.completionRouteTitle, miniGame.completionRouteDetail, miniGame.completionRouteSymbolName)
     }
 
+    private func shouldShowChoiceImpact(_ impact: NarrativeChoiceImpact) -> Bool {
+        NarrativeChapter.allCases
+            .flatMap(NarrativeCampaign.moments(for:))
+            .first(where: { $0.id == impact.sourceMomentID })?
+            .choices.count ?? 0 > 1
+    }
+
     private func miniGameSummary(_ miniGame: NarrativeMiniGame) -> String {
         switch miniGame {
         case .trace:
@@ -5011,25 +5032,18 @@ struct NarrativeCampaignView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            Image(systemName: "hand.raised.fill")
-                .foregroundStyle(.white.opacity(0.72))
-            Text("没有失败路线。每一次选择都会让支持网络以不同方式出现。")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
-            if game.accessibilityPreferences.keyboardAlternativeInput,
-               let target = game.focusedNarrativeKeyboardTarget {
-                keyboardTargetChip(target)
-            }
-            Spacer()
-            if campaign.explorationReady == false {
-                Label("场景中还有未确认的线索", systemImage: "location.magnifyingglass")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.78))
-            }
-            if campaign.currentMomentActionReady == false {
-                Label(campaign.currentMomentActionPrompt ?? "先确认当前空间里的关键位置", systemImage: "figure.walk")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.82))
+            Spacer(minLength: 0)
+            if let target = game.focusedNarrativeKeyboardTarget,
+               target.requiresMovement || campaign.explorationReady == false || campaign.currentMomentActionReady == false {
+                Button {
+                    _ = game.performNarrativeKeyboardCommand(.confirm)
+                } label: {
+                    Label(target.title, systemImage: target.symbol)
+                        .font(.system(size: 13, weight: .bold))
+                        .frame(minWidth: 180, minHeight: 34)
+                }
+                .buttonStyle(SegmentButtonStyle(isSelected: true))
+                .help(target.detail)
             }
             if let hotspot = campaign.nearbyHotspot {
                 Button { game.interactNarrativeHotspot() } label: {
@@ -5044,6 +5058,7 @@ struct NarrativeCampaignView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white.opacity(0.8))
             }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

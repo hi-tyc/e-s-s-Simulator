@@ -18,8 +18,6 @@ let package = Package(
                 .copy("Resources/ATTRIBUTION.md"),
                 .copy("Resources/AudioCues"),
                 .copy("Resources/AudioLoops"),
-                .copy("Resources/Models"),
-                .copy("Resources/HDRI"),
                 .copy("Resources/SupportResources")
             ]
         ),
