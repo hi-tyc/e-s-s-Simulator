@@ -99,6 +99,7 @@ final class GameManager: ObservableObject {
     private let memoryStoreKey = "LateStudySimulator.ClassmateMemory.v1"
     private let prologueStoreKey = "LateStudySimulator.Prologue.v1"
     private let accessibilityStoreKey = "LateStudySimulator.Accessibility.v1"
+    private let initialGuideStoreKey = "LateStudySimulator.InitialGuide.v1"
     private var prologueTimer: Timer?
     private var menuGuideTimer: Timer?
     private var gameGuideExitTimer: Timer?
@@ -118,6 +119,15 @@ final class GameManager: ObservableObject {
         audioAssetStatus = audio.assetStatus
         classmateMemory = loadClassmateMemory()
         loadPrologueProgress()
+        if shouldStartAudioEngine == false {
+            hasCompletedInitialGameGuide = false
+        } else if let storedGuideState = UserDefaults.standard.object(forKey: initialGuideStoreKey) as? Bool {
+            hasCompletedInitialGameGuide = storedGuideState
+        } else {
+            // Existing installs predate the guide flag; prior prologue progress
+            // proves this is not the player's first launch.
+            hasCompletedInitialGameGuide = prologueState.openingViewed || prologueState.prologueCompleted
+        }
     }
 
     func startExperience(forcePrologue: Bool = false) {
@@ -175,6 +185,41 @@ final class GameManager: ObservableObject {
         guard isGameGuidePresented, gameGuideExitCountdown == 0 else { return }
         isGameGuidePresented = false
         hasCompletedInitialGameGuide = true
+        if shouldStartAudioEngine {
+            UserDefaults.standard.set(true, forKey: initialGuideStoreKey)
+        }
+    }
+
+    var isGameInProgress: Bool {
+        isPrologueActive || gameState == .playing || {
+            if case .event = gameState { return true }
+            return false
+        }()
+    }
+
+    func resetProgress() {
+        guard gameState == .menu else { return }
+        prologueState = PrologueState()
+        classmateMemory = [:]
+        UserDefaults.standard.removeObject(forKey: prologueStoreKey)
+        UserDefaults.standard.removeObject(forKey: memoryStoreKey)
+        UserDefaults.standard.removeObject(forKey: initialGuideStoreKey)
+        hasCompletedInitialGameGuide = false
+        isAccessibilityPanelPresented = false
+        menuGuideTimer?.invalidate()
+        menuGuideTimer = nil
+        isGameGuidePresented = false
+        gameGuideExitTimer?.invalidate()
+        gameGuideExitTimer = nil
+        gameGuideExitCountdown = 0
+        message = "进度已重置。首次进入前请阅读新手必看。"
+        beginInitialGameGuideIfNeeded()
+    }
+
+    func returnToMenuFromSettings() {
+        guard isGameInProgress else { return }
+        isAccessibilityPanelPresented = false
+        returnToMenuForNewGame()
     }
 
     func startPrologue(resume: Bool = false) {
@@ -268,6 +313,7 @@ final class GameManager: ObservableObject {
     func returnToMenuForNewGame() {
         stopPrologueTimer()
         isPrologueActive = false
+        isAccessibilityPanelPresented = false
         prologuePauseReasons = []
         freeRoamTimer?.invalidate()
         freeRoamTimer = nil
@@ -482,6 +528,13 @@ final class GameManager: ObservableObject {
             prologueState.accessibilityTutorialAcknowledged = true
             prologueActionReady = true
             message = "辅助设置已确认。按 C 可以提前结束这一步。"
+        }
+    }
+
+    func openAccessibilityPanel() {
+        isAccessibilityPanelPresented = true
+        if isPrologueActive {
+            prologuePauseReasons.insert(.settings)
         }
     }
 

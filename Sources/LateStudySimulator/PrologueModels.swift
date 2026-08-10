@@ -45,15 +45,15 @@ enum PrologueBeatID: String, Codable, CaseIterable {
         case .returnToSeat:
             return "使用 WASD 进行移动，鼠标控制方向。\n\n按住 Shift 可以侧身行走，碰撞体积更小，但是走得会慢；按住 Control 可以快速奔跑，会增加一点饥饿值。\n\n请走回第三排自己的座位，靠近座位后按 E 入座。完成入座前不能用 C 跳过；暂时不操作也会在倒计时结束后自动继续。"
         case .placeWater:
-            return "将视角移向桌面，看到可互动目标后按空格键，把水杯放到桌上。放好后会解锁 C，可以提前结束剩余倒计时。"
+            return "先把水杯放到桌上，做好晚自习的一切准备。单击 E 键即可完成操作，游戏里的其他交互也都是 E 键。放好后会解锁 C，可以提前结束剩余倒计时。"
         case .studyHallRhythm:
             return "留在座位观察教室。你仍可移动鼠标环顾四周，也可以按 ～ 键暂时释放鼠标。"
         case .noticeLinChe:
             return "向左转动视角，找到林澈并稍作停留。先观察，不需要立刻作出判断。"
         case .settleBreath:
-            return "点击“深呼吸”完成一次自我调整，也可以选择先坐一会儿。完成后会解锁 C。照顾自己和观察同学同样重要。"
+            return "点击“深呼吸”完成一次自我调整，也可以选择先坐一会儿。深呼吸可以有效降低压力和面具成本，恢复注意力，帮助调整状态。完成后会解锁 C。"
         case .accessibility:
-            return "你可以调整字幕、声音、动态效果和输入方式。点击“调整体验”，或选择“继续”；确认后会解锁 C。"
+            return "你可以调整字幕、声音、动态效果和输入方式。点击“调整体验”即可。你也可以选择不调整，点击“继续”。在之后的游戏中可以随时点击 Esc 键进行调整；确认后会解锁 C。"
         case .bellBeforeClass:
             return "自由观察铃响前的教室。倒计时结束后序章会自动进入第一章。"
         }
@@ -78,7 +78,7 @@ enum PrologueBeatID: String, Codable, CaseIterable {
         case .gateArrival: return "脚步会带你进入教学楼"
         case .lookDownHall: return "移动鼠标或使用视角键"
         case .returnToSeat: return "使用 WASD，或等待苏念自己走回去"
-        case .placeWater: return "看向桌面，按空格确认"
+        case .placeWater: return "看向桌面，按 E 确认"
         case .studyHallRhythm: return "你可以转头、暂停或调整字幕"
         case .noticeLinChe: return "先看见，不急着判断"
         case .settleBreath: return "不想操作也没关系，先坐一会儿"
