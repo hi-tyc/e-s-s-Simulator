@@ -105,17 +105,18 @@ struct ContentView: View {
                 VStack(spacing: 5) {
                     Text("新手必看！！！游戏说明")
                         .font(.custom("Songti SC", size: 25).weight(.bold))
+                        .foregroundStyle(.white.opacity(0.92))
                     if game.hasCompletedInitialGameGuide == false {
                         Text("\(game.menuGuideCountdown) 秒后自动跳转")
                             .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.64))
+                            .foregroundStyle(.white.opacity(0.78))
                     } else {
                         Text("点击再次查看")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(.white.opacity(0.7))
                     }
                 }
-                .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
@@ -197,13 +198,15 @@ struct ContentView: View {
                             gameGuideChapterRoadmap
                         }
 
+                        gameGuideAttributes
+
                         Divider().overlay(.white.opacity(0.12))
 
                             HStack(alignment: .top, spacing: 28) {
                             guideSection(
                                 title: "如何操作",
                                 icon: "keyboard",
-                                text: "移动鼠标控制视角，WASD 行走，空格确认互动。按 ～ 释放或恢复鼠标；新手教学中按 T 可重新查看当前提示。"
+                                text: "移动鼠标控制视角，WASD 行走，E 键确认互动。按 ～ 释放或恢复鼠标；新手教学中按 T 可重新查看当前提示。"
                             )
                             guideSection(
                                 title: "如何体验",
@@ -318,7 +321,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("主要人物", systemImage: "person.3.fill")
                 .font(.system(size: 15, weight: .bold))
-            Text("苏念：玩家角色，高二（3）班新任心理委员。她善于观察，也承受着自己的学业与家庭压力。\n林澈：苏念的同桌，成绩优秀，却被完美主义困住。\n江越：求助纸条的主人，主线中真正需要被可靠支持接住的人。\n周予安、许栀、陈言：以不同方式参与协作的班干部。\n方老师与心理老师：成人支持和专业帮助的承接者。")
+            Text(gameGuideCharacterText)
                 .font(.custom("Kaiti SC", size: 15))
                 .foregroundStyle(.white.opacity(0.74))
                 .lineSpacing(4)
@@ -333,7 +336,33 @@ struct ContentView: View {
             Text("当前版本已搭建第一章框架，后续章节将依次完成。")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
-            Text("1 静音的教室：发现异常与求助纸条。\n2 走廊的镜子：练习倾听，不急着说教。\n3 那张纸条：确认求助者与去向。\n4 13 楼的缝隙：陪江越留下并判断风险。\n5 有灯亮着的房间：把支持交给可靠成人。\n6 这里有光：看见支持网络，也允许苏念被帮助。")
+            Text(gameGuideChapterText)
+                .font(.custom("Kaiti SC", size: 15))
+                .foregroundStyle(.white.opacity(0.74))
+                .lineSpacing(4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var gameGuideCharacterText: String {
+        let jiangYue = game.prologueState.prologueCompleted
+            ? "江越：求助纸条的主人，主线中真正需要被可靠支持接住的人。"
+            : "江越：？？？"
+        return "苏念：玩家角色，高二（3）班新任心理委员。她善于观察，也承受着自己的学业与家庭压力。\n林澈：苏念的同桌，成绩优秀，却被完美主义困住。\n\(jiangYue)\n周予安：班级事务的执行者，做事直接，习惯把混乱整理成清单。\n许栀：细心而敏感，常常先注意到别人情绪里的细小变化。\n陈言：安静可靠，愿意在关键时刻提供实际帮助。\n方老师：高二（3）班班主任，负责维持班级秩序，也在学习如何真正理解学生。\n心理老师：学校专业支持的承接者，帮助学生把难以独自承担的事情交给可靠的大人。"
+    }
+
+    private var gameGuideChapterText: String {
+        let chapterFour = game.prologueState.prologueCompleted
+            ? "4 13 楼的缝隙：陪江越留下并判断风险。"
+            : "4 ？？？"
+        return "1 静音的教室：发现异常与求助纸条。\n2 走廊的镜子：练习倾听，不急着说教。\n3 那张纸条：确认求助者与去向。\n\(chapterFour)\n5 有灯亮着的房间：把支持交给可靠成人。\n6 这里有光：看见支持网络，也允许苏念被帮助。"
+    }
+
+    private var gameGuideAttributes: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("重要属性", systemImage: "waveform.path.ecg")
+                .font(.system(size: 15, weight: .bold))
+            Text("心理能量：苏念维持行动和自我调节的内在余力。能量过低时，选择会变得更困难，也更需要先休息。\n注意力：当前能够稳定观察、倾听和处理信息的程度。注意力不足时，细节可能从视线和声音中滑过去。\n面具成本：为了表现得“没事”、维持合适的样子而付出的心理代价。它越高，越需要留意自己是否一直在压抑真实感受。\n压力：学业、秩序、他人目光和未解决的情绪共同形成的紧绷感。压力会影响感知和行动，也可以通过呼吸、休息、喝水与可靠的交流逐渐缓解。")
                 .font(.custom("Kaiti SC", size: 15))
                 .foregroundStyle(.white.opacity(0.74))
                 .lineSpacing(4)
@@ -376,7 +405,7 @@ struct ContentView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 Text(game.message)
-                    .font(.custom("STXingkai", size: 20))
+                    .font(.custom("Kaiti SC", size: 18))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.94))
                     .frame(maxWidth: 760)
@@ -406,7 +435,7 @@ struct ContentView: View {
                 .id(game.prologueCurrentBeat)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             Text(game.prologueCurrentBeat.tutorialInstruction)
-                .font(.custom("Kaiti SC", size: 14))
+                .font(.custom("Kaiti SC", size: 18))
                 .foregroundStyle(.white.opacity(0.72))
                 .fixedSize(horizontal: false, vertical: true)
             if game.prologueCurrentBeat == .lookDownHall {
@@ -462,7 +491,7 @@ struct ContentView: View {
                     .font(.custom("Songti SC", size: 34).weight(.semibold))
                     .multilineTextAlignment(.center)
 
-                Text(game.prologueCurrentBeat.tutorialInstruction)
+                prologueTutorialInstructionText
                     .font(.custom("Kaiti SC", size: 20))
                     .foregroundStyle(.white.opacity(0.82))
                     .multilineTextAlignment(.center)
@@ -506,6 +535,13 @@ struct ContentView: View {
         .transition(.opacity)
     }
 
+    private var prologueTutorialInstructionText: Text {
+        guard game.prologueCurrentBeat == .placeWater else {
+            return Text(game.prologueCurrentBeat.tutorialInstruction)
+        }
+        return Text("先把水杯放到桌上，做好晚自习的一切准备。单击 E 键即可完成操作，\(Text("游戏里的其他交互也都是 E 键").bold())。放好后会解锁 C，可以提前结束剩余倒计时。")
+    }
+
     @ViewBuilder
     private var prologueControls: some View {
         switch game.prologueCurrentBeat {
@@ -534,7 +570,7 @@ struct ContentView: View {
             }
             .padding(.top, 8)
         case .placeWater:
-            Text("空格 · 确认")
+            Text("E · 确认")
                 .font(.system(size: 12, weight: .bold))
                 .padding(.horizontal, 13)
                 .frame(height: 32)
@@ -584,6 +620,31 @@ struct ContentView: View {
                 Text("这些设置会立即保留到后续章节。")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.58))
+                Divider().overlay(.white.opacity(0.12))
+                HStack(spacing: 10) {
+                    Button {
+                        game.returnToMenuFromSettings()
+                    } label: {
+                        Label("返回主页", systemImage: "house.fill")
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .disabled(game.isGameInProgress == false)
+
+                    Button {
+                        game.resetProgress()
+                    } label: {
+                        Label("重置进度", systemImage: "arrow.counterclockwise")
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .disabled(game.gameState != .menu)
+                }
+                Text(game.isGameInProgress
+                     ? "退出当前一局后，才能重置全部进度。"
+                     : "重置后将重新显示首次说明，并隐藏尚未解锁的剧情信息。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.5))
             }
             .toggleStyle(.switch)
             .padding(22)
@@ -1364,8 +1425,9 @@ struct ContentView: View {
                 }
             }
             Text(game.message)
-                .font(.system(size: 14))
+                .font(.custom("Kaiti SC", size: 14))
                 .multilineTextAlignment(.center)
+                .lineSpacing(2)
                 .lineLimit(3)
         }
         .padding(.horizontal, 18)

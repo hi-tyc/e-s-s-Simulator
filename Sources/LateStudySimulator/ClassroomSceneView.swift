@@ -534,13 +534,20 @@ final class ClassroomCoordinator {
         }
         if event.keyCode == 49 {
             if isDown && event.isARepeat == false {
+                if currentGame?.isPrologueActive == true,
+                   currentGame?.prologueCurrentBeat == .placeWater {
+                    return
+                }
                 currentGame?.confirmPrologueInteraction()
             }
             return
         }
         if event.keyCode == 14 {
             if isDown && event.isARepeat == false {
-                if currentGame?.confirmPrologueSeat() != true {
+                if currentGame?.isPrologueActive == true,
+                   currentGame?.prologueCurrentBeat == .placeWater {
+                    currentGame?.confirmPrologueInteraction()
+                } else if currentGame?.confirmPrologueSeat() != true {
                     currentGame?.interactWithNearbyDoor()
                 }
             }
@@ -634,6 +641,10 @@ final class ClassroomCoordinator {
             if Self.isCompleteTutorialKey(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers),
                self.currentGame?.isPrologueActive == true {
                 self.currentGame?.completeCurrentPrologueEarly()
+                return nil
+            }
+            if event.keyCode == 53, self.currentGame != nil {
+                self.currentGame?.openAccessibilityPanel()
                 return nil
             }
             return event
