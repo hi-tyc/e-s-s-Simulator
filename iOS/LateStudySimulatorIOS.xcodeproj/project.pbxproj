@@ -1,0 +1,83 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* LateStudySimulatorIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* LateStudySimulatorIOSApp.swift */; };
+		A10000000000000000000002 /* MobileGameModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* MobileGameModel.swift */; };
+		A10000000000000000000003 /* MobileClassroomSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* MobileClassroomSceneView.swift */; };
+		A10000000000000000000004 /* MobileContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* MobileContentView.swift */; };
+		A10000000000000000000005 /* GameModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* GameModels.swift */; };
+		A10000000000000000000006 /* GameManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* GameManager.swift */; };
+		A10000000000000000000007 /* PrologueModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* PrologueModels.swift */; };
+		A10000000000000000000008 /* SpatialAudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* SpatialAudioManager.swift */; };
+		A10000000000000000000009 /* IOSOriginalGameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* IOSOriginalGameView.swift */; };
+		A10000000000000000000010 /* IOSOriginalSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* IOSOriginalSceneView.swift */; };
+		A10000000000000000000011 /* AudioCues in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* AudioCues */; };
+		A10000000000000000000012 /* AudioLoops in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* AudioLoops */; };
+		A10000000000000000000013 /* ClassroomSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* ClassroomSceneView.swift */; };
+		A10000000000000000000014 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* ContentView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000000 /* LateStudySimulatorIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LateStudySimulatorIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000001 /* LateStudySimulatorIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LateStudySimulatorIOSApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* MobileGameModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileGameModel.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* MobileClassroomSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileClassroomSceneView.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* MobileContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileContentView.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* GameModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GameModels.swift; path = ../Sources/LateStudySimulator/GameModels.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* GameManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GameManager.swift; path = ../Sources/LateStudySimulator/GameManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* PrologueModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PrologueModels.swift; path = ../Sources/LateStudySimulator/PrologueModels.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* SpatialAudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SpatialAudioManager.swift; path = ../Sources/LateStudySimulator/SpatialAudioManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* IOSOriginalGameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSOriginalGameView.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* IOSOriginalSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSOriginalSceneView.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* AudioCues */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ../Sources/LateStudySimulator/Resources/AudioCues; sourceTree = "<group>"; };
+		A20000000000000000000012 /* AudioLoops */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ../Sources/LateStudySimulator/Resources/AudioLoops; sourceTree = "<group>"; };
+		A20000000000000000000013 /* ClassroomSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ClassroomSceneView.swift; path = ../Sources/LateStudySimulator/ClassroomSceneView.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ContentView.swift; path = ../Sources/LateStudySimulator/ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000000 = {isa = PBXGroup; children = (A40000000000000000000001, A40000000000000000000002); sourceTree = "<group>"; };
+		A40000000000000000000001 /* iOS */ = {isa = PBXGroup; children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000005, A20000000000000000000006, A20000000000000000000007, A20000000000000000000008, A20000000000000000000009, A20000000000000000000010, A20000000000000000000011, A20000000000000000000012, A20000000000000000000013, A20000000000000000000014); path = .; sourceTree = "<group>"; };
+		A40000000000000000000002 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000000); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* LateStudySimulatorIOS */ = {isa = PBXNativeTarget; buildConfigurationList = A60000000000000000000001; buildPhases = (A30000000000000000000002, A30000000000000000000001, A30000000000000000000003); buildRules = (); dependencies = (); name = LateStudySimulatorIOS; productName = LateStudySimulatorIOS; productReference = A20000000000000000000000; productType = "com.apple.product-type.application"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A70000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = { LastUpgradeCheck = 2700; TargetAttributes = { A50000000000000000000001 = { CreatedOnToolsVersion = 27.0; }; }; }; buildConfigurationList = A60000000000000000000000; compatibilityVersion = "Xcode 16.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A40000000000000000000000; productRefGroup = A40000000000000000000002; projectDirPath = ""; projectRoot = ""; targets = (A50000000000000000000001); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A30000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000011, A10000000000000000000012); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A30000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005, A10000000000000000000006, A10000000000000000000007, A10000000000000000000008, A10000000000000000000009, A10000000000000000000010, A10000000000000000000013, A10000000000000000000014); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A80000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "晚自习模拟器"; INFOPLIST_KEY_LSRequiresIPhoneOS = YES; INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIRequiresFullScreen = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations = (UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight); INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight); IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.late-study-simulator.ios; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A80000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "晚自习模拟器"; INFOPLIST_KEY_LSRequiresIPhoneOS = YES; INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIRequiresFullScreen = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations = (UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight); INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = (UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight); IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.late-study-simulator.ios; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A80000000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; }; name = Debug; };
+		A80000000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 6.0; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A60000000000000000000000 /* Project build configuration list */ = {isa = XCConfigurationList; buildConfigurations = (A80000000000000000000003, A80000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A60000000000000000000001 /* Target build configuration list */ = {isa = XCConfigurationList; buildConfigurations = (A80000000000000000000001, A80000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A70000000000000000000001 /* Project object */;
+}
