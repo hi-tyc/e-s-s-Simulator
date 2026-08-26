@@ -294,7 +294,10 @@ final class ClassroomCoordinator {
                 let height: Float = game.player.posture == .standing ? 1.58 : 1.18
                 let stressSway = Float(min(0.035, game.player.stress / 2_500))
                 let attentionDip = Float(max(0, 35 - game.player.visualAttention) / 1_200)
-                cameraRig.position = SCNVector3(-0.6 + stressSway, height - attentionDip, 1.5)
+                let seat = game.selectedChapterSeat ?? (row: 2, column: 1)
+                let deskX = Float(seat.column) * 1.2 - 2.4
+                let deskZ = Float(seat.row) * 1.45 - 2.25
+                cameraRig.position = SCNVector3(deskX + stressSway, height - attentionDip, deskZ + 0.55)
                 cameraRig.eulerAngles = SCNVector3(Float(game.studentLookPitch), Float(game.studentLookYaw), 0)
                 cameraRig.camera?.fieldOfView = 100
             }
@@ -331,11 +334,17 @@ final class ClassroomCoordinator {
                 cameraRig.camera?.fieldOfView = 90
             }
         case .placeWater:
-            cameraRig.position = SCNVector3(-0.6, 1.18, 1.5)
+            let seat = game.selectedChapterSeat ?? (row: 2, column: 1)
+            let deskX = Float(seat.column) * 1.2 - 2.4
+            let deskZ = Float(seat.row) * 1.45 - 2.25
+                cameraRig.position = SCNVector3(deskX, 1.18, deskZ + 0.85)
             cameraRig.eulerAngles = SCNVector3(-0.5, 0, 0)
             cameraRig.camera?.fieldOfView = 82
         case .studyHallRhythm, .noticeLinChe, .settleBreath, .accessibility, .bellBeforeClass:
-            cameraRig.position = SCNVector3(-0.6, 1.18, 1.5)
+            let seat = game.selectedChapterSeat ?? (row: 2, column: 1)
+            let deskX = Float(seat.column) * 1.2 - 2.4
+            let deskZ = Float(seat.row) * 1.45 - 2.25
+            cameraRig.position = SCNVector3(deskX, 1.18, deskZ + 0.85)
             cameraRig.eulerAngles = SCNVector3(Float(game.studentLookPitch), Float(game.studentLookYaw), 0)
             cameraRig.camera?.fieldOfView = 94
         }
@@ -590,6 +599,7 @@ final class ClassroomCoordinator {
         applyPendingMouseLook()
         currentGame?.updatePrologueLookExploration(isMoving: isLooking, delta: 1.0 / 60.0)
         currentGame?.updatePrologueDwell(delta: 1.0 / 60.0)
+        currentGame?.updateChapterLookDwell(delta: 1.0 / 60.0)
         guard let game = currentGame, game.freeRoam.isActive else {
             lastMovementTick = Date()
             return
@@ -647,8 +657,27 @@ final class ClassroomCoordinator {
                 self.currentGame?.openAccessibilityPanel()
                 return nil
             }
+            if event.isARepeat == false,
+               let game = self.currentGame,
+               case .playing = game.gameState,
+               game.isPrologueActive == false,
+               game.activeRole.isTeacher == false,
+               let action = Self.playerAction(for: event) {
+                game.execute(action)
+                return nil
+            }
             return event
         }
+    }
+
+    private static func playerAction(for event: NSEvent) -> PlayerAction? {
+        let keyCodeMap: [UInt16: Character] = [
+            18: "1", 19: "2", 20: "3", 21: "4", 23: "5",
+            22: "6", 26: "7", 28: "8", 25: "9", 29: "0"
+        ]
+        let key = keyCodeMap[event.keyCode] ?? event.charactersIgnoringModifiers?.first
+        guard let key else { return nil }
+        return PlayerAction.allCases.first { $0.shortcut == key }
     }
 
     private func installMouseLookMouseMonitor() {
@@ -1233,12 +1262,9 @@ final class ClassroomCoordinator {
             for column in 0..<4 {
                 let x = Float(column) * 1.2 - 2.4
                 let z = Float(row) * 1.45 - 2.25
-                let isPlayerSeat = row == 2 && column == 1
-                root.addChildNode(makeDesk(at: SCNVector3(x, 0, z), isPlayer: isPlayerSeat))
+                root.addChildNode(makeDesk(at: SCNVector3(x, 0, z), isPlayer: false))
                 let chair = makeChair(at: SCNVector3(x, 0, z + 0.55))
-                if isPlayerSeat {
-                    chair.name = "playerGroundedChair"
-                }
+                if row == 2 && column == 1 { chair.name = "playerGroundedChair" }
                 root.addChildNode(chair)
             }
         }
@@ -1393,19 +1419,15 @@ final class ClassroomCoordinator {
     }
 
     private func addClassmates(classmates: [Classmate]) {
-        var id = 0
-        for row in 0..<5 {
-            for column in 0..<4 {
-                if row == 2 && column == 1 { continue }
-                let x = Float(column) * 1.2 - 2.4
-                let z = Float(row) * 1.45 - 2.0
-                let profile = classmates.first(where: { $0.id == id })?.profile
-                let node = makeStudent(seed: id, profile: profile)
-                node.position = SCNVector3(x, 0.5, z)
-                classmateNodes[id] = node
-                scene.rootNode.addChildNode(node)
-                id += 1
-            }
+        for classmate in classmates {
+            let row = classmate.seat.row
+            let column = classmate.seat.column
+            let x = Float(column) * 1.2 - 2.4
+            let z = Float(row) * 1.45 - 2.0
+            let node = makeStudent(seed: classmate.id, profile: classmate.profile)
+            node.position = SCNVector3(x, 0.5, z)
+            classmateNodes[classmate.id] = node
+            scene.rootNode.addChildNode(node)
         }
     }
 
@@ -1736,6 +1758,17 @@ final class ClassroomCoordinator {
     }
 
     private func updateDeskState(game: GameManager) {
+        let selected = game.selectedChapterSeat ?? (row: 2, column: 1)
+        let selectedX = Float(selected.column) * 1.2 - 2.4
+        let selectedZ = Float(selected.row) * 1.45 - 1.70
+        var selectedChair: SCNNode?
+        scene.rootNode.enumerateChildNodes { node, _ in
+            guard selectedChair == nil, node.geometry != nil else { return }
+            if abs(node.position.x - CGFloat(selectedX)) < 0.01 && abs(node.position.z - CGFloat(selectedZ)) < 0.01 {
+                selectedChair = node
+            }
+        }
+        selectedChair?.name = "playerGroundedChair"
         let shouldShowSeatedProps = game.viewMode == .student && game.player.posture == .seated && game.freeRoam.isActive == false
         playerSeatedPropsNode.isHidden = shouldShowSeatedProps == false
         guard shouldShowSeatedProps else {
@@ -1746,6 +1779,11 @@ final class ClassroomCoordinator {
             seatTensionNode.removeAction(forKey: "seat_tension")
             return
         }
+
+        let seat = game.selectedChapterSeat ?? (row: 2, column: 1)
+        let deskX = Float(seat.column) * 1.2 - 2.4
+        let deskZ = Float(seat.row) * 1.45 - 2.25
+            playerSeatedPropsNode.position = SCNVector3(deskX + 0.6, 0, deskZ - 0.65)
 
         let progress = max(0.02, min(1.0, game.player.homework / 100))
         homeworkProgressNode.scale = SCNVector3(Float(progress) * 0.46, 1, 1)

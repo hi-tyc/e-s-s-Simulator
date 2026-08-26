@@ -13,7 +13,6 @@ struct ContentView: View {
                 vignette
             }
             if game.isPrologueActive == false {
-                peripheralIndicators
                 eventCinematicLayer
             }
 
@@ -24,7 +23,9 @@ struct ContentView: View {
             } else {
                 VStack(spacing: 0) {
                     topHUD
-                    modePanel
+                    if game.activeRole.isTeacher {
+                        modePanel
+                    }
                     Spacer()
                     messagePanel
                     actionBar
@@ -36,11 +37,11 @@ struct ContentView: View {
                 eventOverlay(event)
             }
 
-            if case .ending(let ending) = game.gameState {
+            if case .ending(let ending) = game.gameState, game.isChapterOneTransitionPresented == false {
                 endingOverlay(ending)
             }
 
-            if isPerceptionPanelPresented {
+            if isPerceptionPanelPresented && game.activeRole.isTeacher {
                 perceptionPanel
             }
 
@@ -57,6 +58,16 @@ struct ContentView: View {
             if game.isChapterOneTransitionPresented {
                 chapterOneTransitionOverlay
                     .zIndex(45)
+            }
+
+            if game.isChapterOneGuidePresented {
+                chapterOneGuideOverlay
+                    .zIndex(46)
+            }
+
+            if game.isChapterOnePaperPresented {
+                chapterOnePaperOverlay
+                    .zIndex(47)
             }
 
             if game.isPrologueActive && game.isPrologueTutorialPresented {
@@ -288,24 +299,24 @@ struct ContentView: View {
                 .ignoresSafeArea()
                 .transition(.opacity)
             VStack(spacing: 18) {
-                Text("序章结束")
+                Text("第一章结束")
                     .font(.custom("Songti SC", size: 28).weight(.semibold))
-                Text("铃响以后，真正需要被看见的事才刚刚开始。")
+                Text("你已经听见了这间教室里不愿被说出的部分。")
                     .font(.custom("Kaiti SC", size: 17))
                     .foregroundStyle(.white.opacity(0.68))
                 Button {
-                    game.enterChapterOneAfterPrologue()
+                    game.enterChapterTwo()
                 } label: {
-                    Label("进入第一章", systemImage: "arrow.right.circle.fill")
+                    Label("进入第二章", systemImage: "arrow.right.circle.fill")
                         .font(.system(size: 14, weight: .bold))
                         .frame(width: 180, height: 42)
                 }
                 .buttonStyle(ActionButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 Button {
-                    game.restartPrologueTutorial()
+                    game.returnToMenuForNewGame()
                 } label: {
-                    Label("重新学习基础操作", systemImage: "arrow.counterclockwise")
+                    Label("返回开始", systemImage: "house.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 180, height: 36)
                 }
@@ -315,6 +326,121 @@ struct ContentView: View {
             .transition(.opacity)
         }
         .animation(.easeIn(duration: 1.2), value: game.isChapterOneTransitionPresented)
+    }
+
+    private var chapterOneGuideOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.84).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 18) {
+                Text("第一章 · 静音的教室")
+                    .font(.custom("Songti SC", size: 30).weight(.bold))
+                Text("这一章，你将留在晚自习教室中，观察几处不太寻常的信号。你不需要立刻解决任何人的问题，先看见、听见，再确认下一步。")
+                    .font(.custom("Kaiti SC", size: 17))
+                    .lineSpacing(5)
+                    .foregroundStyle(.white.opacity(0.82))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("本章步骤")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("1 观察林澈的状态\n2 听清右侧被环境声盖住的声音\n3 先照顾好自己的状态\n4 在下课前问林澈一句\n5 确认掉到桌边的匿名纸条\n6 在林澈离开时跟上他")
+                        .font(.custom("Kaiti SC", size: 15))
+                        .lineSpacing(4)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                Text("没有唯一正确的选择。你可以先照顾自己，也可以暂时停下来观察。")
+                    .font(.custom("Kaiti SC", size: 14))
+                    .foregroundStyle(.white.opacity(0.58))
+                Button {
+                    game.dismissChapterOneGuide()
+                } label: {
+                    Label("开始第一章", systemImage: "arrow.right.circle.fill")
+                        .frame(width: 170, height: 40)
+                }
+                .buttonStyle(ActionButtonStyle())
+            }
+            .padding(32)
+            .frame(width: 680)
+            .liquidGlassPanel(cornerRadius: 10)
+        }
+    }
+
+    private var chapterOneSeatSelectionOverlay: some View {
+        EmptyView()
+        /*
+            ZStack {
+            Color.black.opacity(0.84).ignoresSafeArea()
+            VStack(spacing: 16) {
+                Text("选择你的座位")
+                    .font(.custom("Songti SC", size: 28).weight(.bold))
+                Text("请选择教室中间、四周都有同学的位置。左侧座位将保留林澈。")
+                    .font(.custom("Kaiti SC", size: 15))
+                    .foregroundStyle(.white.opacity(0.7))
+                VStack(spacing: 8) {
+                    Text("讲台")
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(.white.opacity(0.12))
+                    ForEach(0..<5, id: \.self) { row in
+                        HStack(spacing: 8) {
+                            ForEach([0, 1, 2, 3] as [Int], id: \.self) { column in
+                                let isSelectable = row > 0 && row < 4 && column > 0 && column < 3
+                                Button {
+                                    game.selectChapterSeat(row: row, column: column)
+                                } label: {
+                                    VStack(spacing: 2) {
+                                        Image(systemName: isSelectable ? "chair.fill" : "rectangle.fill")
+                                            .font(.system(size: 15))
+                                        Text(isSelectable ? "(row + 1)-(column + 1)" : "")
+                                            .font(.system(size: 9, design: .rounded))
+                                    }
+                                    .frame(width: 68, height: 42)
+                                }
+                                .buttonStyle(SegmentButtonStyle(isSelected: game.selectedChapterSeat?.row == row && game.selectedChapterSeat?.column == column))
+                                .disabled(!isSelectable)
+                            }
+                        }
+                    }
+                }
+                Text(game.selectedChapterSeat == nil ? "请选择一个座位" : "已选择中间座位 · 左侧为林澈")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.65))
+                Button {
+                    game.confirmChapterSeatSelection()
+                } label: {
+                    Label("确定", systemImage: "checkmark.circle.fill")
+                        .frame(width: 170, height: 40)
+                }
+                .buttonStyle(ActionButtonStyle())
+                .disabled(game.selectedChapterSeat == nil)
+            }
+            .padding(28)
+            .frame(width: 620)
+            .liquidGlassPanel(cornerRadius: 10)
+        }
+        */
+    }
+
+    private var chapterOnePaperOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.86).ignoresSafeArea()
+            VStack(spacing: 20) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white.opacity(0.7))
+                Text("心里很难受，\n但我不知道找谁说。")
+                    .font(.custom("Kaiti SC", size: 25))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(8)
+                Button("继续") { game.dismissChapterOnePaper() }
+                    .buttonStyle(ActionButtonStyle())
+            }
+            .padding(44)
+            .frame(width: 520)
+            .background(Color(red: 0.92, green: 0.87, blue: 0.72).opacity(0.97))
+            .foregroundStyle(Color.black.opacity(0.82))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(color: .black.opacity(0.5), radius: 30, y: 15)
+        }
     }
 
     private var gameGuideCharacters: some View {
@@ -616,6 +742,13 @@ struct ContentView: View {
                 prologueVolumeSlider("环境", value: $game.accessibilityPreferences.ambienceVolume)
                 prologueVolumeSlider("提示音", value: $game.accessibilityPreferences.cueVolume)
                 Toggle("减少动态效果", isOn: $game.accessibilityPreferences.reduceMotion)
+                HStack {
+                    Text("视角灵敏度")
+                    Slider(value: $game.accessibilityPreferences.viewSensitivity, in: 0.25...2.0, step: 0.05)
+                    Text(String(format: "%.2f", game.accessibilityPreferences.viewSensitivity))
+                        .monospacedDigit()
+                        .frame(width: 42, alignment: .trailing)
+                }
                 Toggle("键盘替代输入", isOn: $game.accessibilityPreferences.keyboardAlternativeInput)
                 Text("这些设置会立即保留到后续章节。")
                     .font(.system(size: 11))
@@ -665,11 +798,11 @@ struct ContentView: View {
 
     private var topHUD: some View {
         HStack(alignment: .top, spacing: 14) {
-            compactChapterIdentity
+            chapterPanel
 
             Spacer()
 
-            chapterPanel
+            compactChapterIdentity
         }
     }
 
@@ -1527,7 +1660,7 @@ struct ContentView: View {
                             Button {
                                 game.executeTeacherAction(action)
                             } label: {
-                                actionLabel(icon: action.icon, text: action.rawValue)
+                                actionLabel(icon: action.icon, text: action.rawValue, shortcut: action.shortcut)
                             }
                             .buttonStyle(ActionButtonStyle())
                             .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
@@ -1543,7 +1676,7 @@ struct ContentView: View {
                             Button {
                                 game.execute(action)
                             } label: {
-                                actionLabel(icon: action.icon, text: action.rawValue)
+                                actionLabel(icon: action.icon, text: action.rawValue, shortcut: action.shortcut)
                             }
                             .buttonStyle(ActionButtonStyle())
                             .keyboardShortcut(KeyEquivalent(action.shortcut), modifiers: [])
@@ -1691,14 +1824,20 @@ struct ContentView: View {
         .liquidGlassPanel(tint: game.freeRoam.isActive ? .mint.opacity(0.14) : .cyan.opacity(0.1))
     }
 
-    private func actionLabel(icon: String, text: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-            Text(text)
-                .font(.system(size: 10, weight: .medium))
+    private func actionLabel(icon: String, text: String, shortcut: Character) -> some View {
+        HStack(spacing: 6) {
+            Text(String(shortcut))
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(.cyan.opacity(0.9))
+                .frame(width: 13)
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(text)
+                    .font(.system(size: 10, weight: .medium))
+            }
         }
-        .frame(width: 74, height: 44)
+        .frame(width: 82, height: 44)
     }
 
     private var peripheralIndicators: some View {
