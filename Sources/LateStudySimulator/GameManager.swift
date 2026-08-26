@@ -64,6 +64,10 @@ final class GameManager: ObservableObject {
     @Published var chapterClues: [ChapterClue] = []
     @Published var hasPresentedChapterOneDecision: Bool = false
     @Published var chapterOneDecision: String = ""
+    @Published var isChapterOneGuidePresented = false
+    @Published var isChapterOneSeatSelectionPresented = false
+    @Published var selectedChapterSeat: (row: Int, column: Int)?
+    @Published var isChapterOnePaperPresented = false
     @Published var hasTriggeredLoneliness: Bool = false
     @Published var hasTriggeredPhoneNotification: Bool = false
     @Published var hasTriggeredBroadcast: Bool = false
@@ -104,6 +108,10 @@ final class GameManager: ObservableObject {
     private var menuGuideTimer: Timer?
     private var gameGuideExitTimer: Timer?
     private var prologueDwell: TimeInterval = 0
+    private var chapterLookDwell: TimeInterval = 0
+    private var chapterLookDwellPose: CameraPose?
+    private var rearLookDwell: TimeInterval = 0
+    private var rearLookRiskApplied = false
     private var freeRoamTimer: Timer?
     private var freeRoamPausedAt: Date?
     private var returnToSeatTask: Task<Void, Never>?
@@ -251,6 +259,10 @@ final class GameManager: ObservableObject {
         maxTurns = settings.maxTurns
         activeChapter = .silentClassroom
         chapterOneStep = .observeLinChe
+        isChapterOneGuidePresented = true
+        isChapterOneSeatSelectionPresented = false
+        selectedChapterSeat = (row: Int.random(in: 0...4), column: Int.random(in: 1...2))
+        isChapterOnePaperPresented = false
         currentPhase = .observation
         selectedRole = .regularStudent
         activeRole = .regularStudent
@@ -308,6 +320,12 @@ final class GameManager: ObservableObject {
         addMonologue(chapterOpeningMonologue, intensity: 0.56)
         if shouldStartAudioEngine { audio.start() }
         updatePerception()
+    }
+
+    func dismissChapterOneGuide() {
+        guard isChapterOneGuidePresented else { return }
+        isChapterOneGuidePresented = false
+        message = "你坐在教室中间，左侧是林澈。晚自习开始了。"
     }
 
     func returnToMenuForNewGame() {
@@ -635,6 +653,11 @@ final class GameManager: ObservableObject {
         isChapterOneTransitionPresented = false
     }
 
+    func enterChapterTwo() {
+        isChapterOneTransitionPresented = false
+        message = "第二章内容尚未开放。"
+    }
+
     func restartPrologueTutorial() {
         startPrologue(resume: false)
         // Re-enter at step 1 without replaying the seven-second exterior arrival.
@@ -817,7 +840,7 @@ final class GameManager: ObservableObject {
 
     var chapterOneAvailableActions: [PlayerAction] {
         guard chapterOneStep != .completed else { return [] }
-        var actions = PlayerAction.allCases.filter { $0 != .leaveSeat }
+        var actions = PlayerAction.allCases.filter { $0 != .leaveSeat && $0 != .observe }
         if chapterOneStep == .followLinChe {
             actions.append(.leaveSeat)
         }
@@ -984,12 +1007,7 @@ final class GameManager: ObservableObject {
             handleEyeContact(column: 2)
             addAudioCue(.footstep, direction: "右前方", intensity: teacher.isNearPlayer ? 0.9 : 0.45, note: "脚步声从走廊方向传来。")
         case .rear:
-            spendAttention(for: pose.visionZone, multiplier: teacher.isNearPlayer ? 1.25 : 1)
-            player.exposure += teacher.isNearPlayer ? 32 : 22
-            player.stress += teacher.isNearPlayer ? 10 : 6
-            player.maskCost += 3
-            message = "你坐着回头看向后方。这个动作能确认身后的风险，但在晚自习里非常显眼。"
-            addAudioCue(.chair, direction: "座位下方", intensity: teacher.isNearPlayer ? 0.74 : 0.5, note: "坐着回头会带动椅子和肩膀，比余光更容易暴露。")
+            message = "你看向后方。只要持续停留片刻，才会真正引起注意。"
         case .forward:
             recoverAttention(10)
             player.psychicEnergy = min(100, player.psychicEnergy + 1.5)
@@ -1004,10 +1022,11 @@ final class GameManager: ObservableObject {
 
     func rotateStudentView(deltaX: Double, deltaY: Double) {
         guard case .playing = gameState, activeRole.isTeacher == false, isReturningToSeat == false else { return }
+        guard featuredMonologue == nil else { return }
         if isPrologueActive && prologuePaused { return }
         if isPrologueActive && prologueState.currentBeat.allowsLook == false { return }
         let previousPose = cameraPose
-        let sensitivity = 0.006
+        let sensitivity = 0.006 * accessibilityPreferences.viewSensitivity
         let nextYaw = normalizedAngle(studentLookYaw - deltaX * sensitivity)
         let nextPitch = (studentLookPitch - deltaY * sensitivity).clamped(to: -0.72...0.48)
         studentLookYaw = nextYaw
@@ -1024,7 +1043,6 @@ final class GameManager: ObservableObject {
         if isPrologueActive {
             return
         }
-        applyRearLookRiskIfNeeded(previousPose: previousPose)
         if freeRoam.isActive == false {
             updatePerception()
         }
@@ -1047,9 +1065,10 @@ final class GameManager: ObservableObject {
     }
 
     private func applyRearLookRiskIfNeeded(previousPose: CameraPose) {
-        guard freeRoam.isActive == false, player.posture == .seated, previousPose != .rear, cameraPose == .rear else {
+        guard freeRoam.isActive == false, player.posture == .seated, cameraPose == .rear, rearLookRiskApplied == false else {
             return
         }
+        rearLookRiskApplied = true
         spendAttention(for: .rearPeripheral, multiplier: teacher.isNearPlayer ? 1.25 : 1)
         player.exposure += teacher.isNearPlayer ? 32 : 22
         player.stress += teacher.isNearPlayer ? 10 : 6
@@ -1059,6 +1078,37 @@ final class GameManager: ObservableObject {
             : "你坐着回头看向后方。你获得了确定信息，但这个动作在安静教室里很难不被注意。"
         addAudioCue(.chair, direction: "座位下方", intensity: teacher.isNearPlayer ? 0.74 : 0.5, note: "坐着回头会带动椅子和肩膀，比余光更容易暴露。")
         clampPlayer()
+    }
+
+    func updateChapterLookDwell(delta: TimeInterval) {
+        guard activeChapter == .silentClassroom, isPrologueActive == false,
+              case .playing = gameState, activeRole.isTeacher == false,
+              freeRoam.isActive == false else { return }
+
+        if cameraPose == .rear {
+            rearLookDwell += delta
+            if rearLookDwell >= 2.5 { applyRearLookRiskIfNeeded(previousPose: .rear) }
+        } else {
+            rearLookDwell = 0
+            rearLookRiskApplied = false
+        }
+
+        let shouldObserve: Bool =
+            (chapterOneStep == .observeLinChe && cameraPose == .left) ||
+            (chapterOneStep == .locateHiddenSound && cameraPose == .right) ||
+            (chapterOneStep == .inspectNote && cameraPose == .desk)
+        if shouldObserve {
+            if chapterLookDwellPose == cameraPose { chapterLookDwell += delta }
+            else { chapterLookDwellPose = cameraPose; chapterLookDwell = 0 }
+            if chapterLookDwell >= 2.5 {
+                chapterLookDwell = 0
+                chapterLookDwellPose = nil
+                collectChapterClue(for: .observe)
+            }
+        } else {
+            chapterLookDwell = 0
+            chapterLookDwellPose = nil
+        }
     }
 
     func setMouseLookEnabled(_ enabled: Bool) {
@@ -1858,7 +1908,7 @@ final class GameManager: ObservableObject {
         clampPlayer()
         updateClassmates(after: nil)
         recordSnapshot(actionLabel: "教师-\(action.rawValue)")
-        if currentTurn >= maxTurns {
+        if currentTurn >= maxTurns && activeChapter != .silentClassroom {
             finish()
         } else {
             currentTurn += 1
@@ -1872,7 +1922,7 @@ final class GameManager: ObservableObject {
     }
 
     func continueAfterEvent() {
-        if currentTurn >= maxTurns {
+        if currentTurn >= maxTurns && activeChapter != .silentClassroom {
             if presentChapterOneDecisionIfNeeded() {
                 return
             }
@@ -2521,7 +2571,8 @@ final class GameManager: ObservableObject {
 
     var elapsedMinutes: Int {
         guard maxTurns > 0 else { return 0 }
-        return max(0, min(settings.totalMinutes, Int(Double(max(0, currentTurn - 1)) / Double(maxTurns) * Double(settings.totalMinutes))))
+        let cappedDuration = min(settings.totalMinutes, 150)
+        return max(0, min(cappedDuration, Int(Double(max(0, currentTurn - 1)) / Double(maxTurns) * Double(cappedDuration))))
     }
 
     var clockText: String {
@@ -3454,14 +3505,22 @@ final class GameManager: ObservableObject {
 
     private func completeChapterOne() {
         chapterOneStep = .completed
-        hasPresentedChapterOneDecision = true
         chapterOneDecision = "跟随林澈进入走廊"
         player.posture = .standing
         addAudioCue(.chair, direction: "桌边", intensity: 0.66, note: "你起身时椅子轻响，林澈的脚步正越过前门。")
         addMonologue("纸条还不知道是谁写的。但林澈现在不该一个人走。", intensity: 0.78)
-        message = "你把纸条收进口袋，起身跟上林澈。教室的声音留在身后，走廊尽头的镜子亮着。"
+        message = "你把纸条收进口袋，起身跟上林澈。"
+        isChapterOnePaperPresented = true
         recordSnapshot(actionLabel: "跟上林澈")
         finish()
+        mouseLookEnabled = false
+        mouseLookCaptured = false
+        isChapterOneTransitionPresented = true
+    }
+
+    func dismissChapterOnePaper() {
+        isChapterOnePaperPresented = false
+        _ = presentChapterOneDecisionIfNeeded()
     }
 
     private func collectChapterClue(_ id: ChapterClueID, messageSuffix: String) {
@@ -4042,12 +4101,15 @@ final class GameManager: ObservableObject {
         let names = ["林澈", "周予安", "江越", "陈言", "许栀", "何屿", "唐宁", "沈星", "顾言", "叶舟", "韩夏", "白辰", "陆遥", "秦一", "苏禾", "姜南", "程川", "宋也", "黎昕"]
         var result: [Classmate] = []
         var id = 0
+        let playerSeat = selectedChapterSeat ?? (row: 2, column: 1)
+        let linCheSeat = (row: playerSeat.row, column: playerSeat.column - 1)
         for row in 0..<5 {
             for column in 0..<4 {
-                if row == 2 && column == 1 { continue }
-                let name = names[id % names.count]
-                let isDeskmate = row == 2 && (column == 0 || column == 2)
-                let profile = classmateProfile(id: id)
+                if row == playerSeat.row && column == playerSeat.column { continue }
+                let isLinChe = row == linCheSeat.row && column == linCheSeat.column
+                let name = isLinChe ? "林澈" : names[max(1, id + 1) % names.count]
+                let isDeskmate = row == playerSeat.row && (column == playerSeat.column - 1 || column == playerSeat.column + 1)
+                let profile = classmateProfile(id: isLinChe ? 0 : max(1, id + 1))
                 let memory = classmateMemory[id]
                 let baseRelationship = isDeskmate ? 42 : Double.random(in: 10...45)
                 let baseStress = isDeskmate ? Double.random(in: 54...86) + profile.anxiety / 12 : Double.random(in: 20...85) + profile.anxiety / 18

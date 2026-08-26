@@ -116,6 +116,7 @@ struct AccessibilityPreferences: Codable, Equatable {
     var cueVolume = 0.7
     var reduceMotion = false
     var keyboardAlternativeInput = true
+    var viewSensitivity = 1.0
 }
 
 enum PrologueCompletionSource: String, Codable {
