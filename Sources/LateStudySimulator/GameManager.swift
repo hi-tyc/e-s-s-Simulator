@@ -34,8 +34,11 @@ final class GameManager: ObservableObject {
     @Published var player = PlayerState()
     @Published var teacher = TeacherState()
     @Published var cameraPose: CameraPose = .forward
-    @Published var studentLookYaw: Double = 0
-    @Published var studentLookPitch: Double = 0
+    // 高频视角状态：不参与 @Published。
+    // 鼠标每移动一个像素都会改动它们，若发布则会触发整个 ContentView.body
+    // （2700+ 行）重建。3D 视图由 ClassroomSceneView 的 60fps tick 直接读取。
+    var studentLookYaw: Double = 0
+    var studentLookPitch: Double = 0
     @Published var mouseLookCaptured: Bool = false
     @Published var mouseLookEnabled: Bool = true
     @Published var freeRoam = StudentFreeRoamState()
@@ -65,7 +68,6 @@ final class GameManager: ObservableObject {
     @Published var hasPresentedChapterOneDecision: Bool = false
     @Published var chapterOneDecision: String = ""
     @Published var isChapterOneGuidePresented = false
-    @Published var isChapterOneSeatSelectionPresented = false
     @Published var selectedChapterSeat: (row: Int, column: Int)?
     @Published var isChapterOnePaperPresented = false
     @Published var hasTriggeredLoneliness: Bool = false
@@ -74,6 +76,7 @@ final class GameManager: ObservableObject {
     @Published var hasTriggeredKnockOnDoor: Bool = false
     @Published var hasTriggeredPlayerBreakdown: Bool = false
     @Published var hasTriggeredClassmateHelpRequest: Bool = false
+    @Published var hasTriggeredSupportNetworkProtection: Bool = false
     @Published var hasTriggeredClassmateReport: Bool = false
     @Published var hasTriggeredMemoryTrust: Bool = false
     @Published var hasTriggeredMemorySuspicion: Bool = false
@@ -123,13 +126,28 @@ final class GameManager: ObservableObject {
     static let returnToSeatResetDelay: TimeInterval = 1.08
     static let returnToSeatTotalDuration: TimeInterval = 1.8
 
-    init() {
+    /// 玩家固定坐在第三排中间。
+    /// 剧情文案、同桌系统、教师视线与线索观察全部假设该座位，
+    /// 因此这里必须是确定值，不能随机化。
+    static let defaultPlayerSeat: (row: Int, column: Int) = (row: 2, column: 1)
+    /// 林澈固定坐在玩家左侧。
+    static var linCheSeat: (row: Int, column: Int) = {
+        (row: defaultPlayerSeat.row, column: defaultPlayerSeat.column - 1)
+    }()
+
+    /// 持久化存储。默认为标准 UserDefaults；测试可注入独立 suite 以避免互相污染。
+    private let store: UserDefaults
+    /// 可注入的时钟，便于测试去除对真实时间的依赖。
+    var now: () -> Date = { Date() }
+
+    init(store: UserDefaults = .standard) {
+        self.store = store
         audioAssetStatus = audio.assetStatus
         classmateMemory = loadClassmateMemory()
         loadPrologueProgress()
         if shouldStartAudioEngine == false {
             hasCompletedInitialGameGuide = false
-        } else if let storedGuideState = UserDefaults.standard.object(forKey: initialGuideStoreKey) as? Bool {
+        } else if let storedGuideState = self.store.object(forKey: initialGuideStoreKey) as? Bool {
             hasCompletedInitialGameGuide = storedGuideState
         } else {
             // Existing installs predate the guide flag; prior prologue progress
@@ -194,7 +212,7 @@ final class GameManager: ObservableObject {
         isGameGuidePresented = false
         hasCompletedInitialGameGuide = true
         if shouldStartAudioEngine {
-            UserDefaults.standard.set(true, forKey: initialGuideStoreKey)
+            self.store.set(true, forKey: initialGuideStoreKey)
         }
     }
 
@@ -209,9 +227,9 @@ final class GameManager: ObservableObject {
         guard gameState == .menu else { return }
         prologueState = PrologueState()
         classmateMemory = [:]
-        UserDefaults.standard.removeObject(forKey: prologueStoreKey)
-        UserDefaults.standard.removeObject(forKey: memoryStoreKey)
-        UserDefaults.standard.removeObject(forKey: initialGuideStoreKey)
+        self.store.removeObject(forKey: prologueStoreKey)
+        self.store.removeObject(forKey: memoryStoreKey)
+        self.store.removeObject(forKey: initialGuideStoreKey)
         hasCompletedInitialGameGuide = false
         isAccessibilityPanelPresented = false
         menuGuideTimer?.invalidate()
@@ -260,8 +278,7 @@ final class GameManager: ObservableObject {
         activeChapter = .silentClassroom
         chapterOneStep = .observeLinChe
         isChapterOneGuidePresented = true
-        isChapterOneSeatSelectionPresented = false
-        selectedChapterSeat = (row: Int.random(in: 0...4), column: Int.random(in: 1...2))
+        selectedChapterSeat = GameManager.defaultPlayerSeat
         isChapterOnePaperPresented = false
         currentPhase = .observation
         selectedRole = .regularStudent
@@ -283,6 +300,8 @@ final class GameManager: ObservableObject {
         freeRoamTimer = nil
         freeRoamPausedAt = nil
         freeRoam = StudentFreeRoamState()
+        // 观察类临时状态必须重置，否则上一局的累计会让新局第一次回头/观察零风险。
+        resetLookDwellState()
         frontDoorOpen = false
         rearDoorOpen = false
         playerLockerOpen = false
@@ -311,6 +330,7 @@ final class GameManager: ObservableObject {
         hasTriggeredKnockOnDoor = false
         hasTriggeredPlayerBreakdown = false
         hasTriggeredClassmateHelpRequest = false
+        hasTriggeredSupportNetworkProtection = false
         hasTriggeredClassmateReport = false
         hasTriggeredMemoryTrust = false
         hasTriggeredMemorySuspicion = false
@@ -322,10 +342,43 @@ final class GameManager: ObservableObject {
         updatePerception()
     }
 
+    /// 重置所有与「持续观察」相关的临时计时状态。
+    /// 新开一局、返回菜单、进入序章时都必须调用，避免跨局脏状态。
+    private func resetLookDwellState() {
+        prologueDwell = 0
+        chapterLookDwell = 0
+        chapterLookDwellPose = nil
+        rearLookDwell = 0
+        rearLookRiskApplied = false
+    }
+
+    /// 停止所有实时循环（定时器与延迟任务）。
+    /// 进入结算/返回菜单时必须调用，避免后台继续推进游戏状态。
+    private func stopRealtimeLoops() {
+        freeRoamTimer?.invalidate()
+        freeRoamTimer = nil
+        freeRoamPausedAt = nil
+        returnToSeatTask?.cancel()
+        returnToSeatTask = nil
+        isReturningToSeat = false
+        monologueDismissTask?.cancel()
+        monologueDismissTask = nil
+        prologueTimer?.invalidate()
+        prologueTimer = nil
+    }
+
     func dismissChapterOneGuide() {
         guard isChapterOneGuidePresented else { return }
         isChapterOneGuidePresented = false
         message = "你坐在教室中间，左侧是林澈。晚自习开始了。"
+    }
+
+    /// 清除当前展示中的独白（仅测试使用）。
+    /// 独白会临时锁定视角输入，测试视角/移动时需要先移除。
+    func dismissFeaturedMonologueForTesting() {
+        featuredMonologue = nil
+        monologueDismissTask?.cancel()
+        monologueDismissTask = nil
     }
 
     func returnToMenuForNewGame() {
@@ -342,6 +395,7 @@ final class GameManager: ObservableObject {
         pendingSprintHunger = 0
         freeRoamPausedAt = nil
         freeRoam = StudentFreeRoamState()
+        resetLookDwellState()
         audio.stop()
         gameState = .menu
         currentPhase = .observation
@@ -695,13 +749,13 @@ final class GameManager: ObservableObject {
     private func savePrologueProgress() {
         guard shouldStartAudioEngine else { return }
         guard let data = try? JSONEncoder().encode(prologueState) else { return }
-        UserDefaults.standard.set(data, forKey: prologueStoreKey)
+        self.store.set(data, forKey: prologueStoreKey)
     }
 
     private func saveAccessibilityPreferences() {
         guard shouldStartAudioEngine else { return }
         guard let data = try? JSONEncoder().encode(accessibilityPreferences) else { return }
-        UserDefaults.standard.set(data, forKey: accessibilityStoreKey)
+        self.store.set(data, forKey: accessibilityStoreKey)
     }
 
     func applyAccessibilityPreferences() {
@@ -714,11 +768,11 @@ final class GameManager: ObservableObject {
     }
 
     private func loadPrologueProgress() {
-        if let data = UserDefaults.standard.data(forKey: prologueStoreKey),
+        if let data = self.store.data(forKey: prologueStoreKey),
            let saved = try? JSONDecoder().decode(PrologueState.self, from: data) {
             prologueState = saved
         }
-        if let data = UserDefaults.standard.data(forKey: accessibilityStoreKey),
+        if let data = self.store.data(forKey: accessibilityStoreKey),
            let saved = try? JSONDecoder().decode(AccessibilityPreferences.self, from: data) {
             accessibilityPreferences = saved
             applyAccessibilityPreferences()
@@ -847,17 +901,24 @@ final class GameManager: ObservableObject {
         return actions
     }
 
+    /// 主线推进动作：不由常规按钮暴露，但必须能被 `execute` 接受。
+    /// 与 `collectChapterClue` 的分支一一对应。
+    var chapterOneMainQuestActions: Set<PlayerAction> {
+        [.observe, .breathe, .drink, .talk, .note]
+    }
+
     func restartWithCurrentSettings() {
         startGame()
     }
 
     func clearClassmateMemory() {
         classmateMemory = [:]
-        UserDefaults.standard.removeObject(forKey: memoryStoreKey)
+        self.store.removeObject(forKey: memoryStoreKey)
         message = "同学记忆已清除。下一次晚自习会从新的关系基线开始。"
     }
 
     func refreshAudioAssetStatus() {
+        audio.invalidateAssetStatus()
         audioAssetStatus = audio.assetStatus
         message = "音频素材已刷新：\(audioAssetStatus.summary)，\(audioAssetStatus.missingSummary)。"
     }
@@ -1081,9 +1142,12 @@ final class GameManager: ObservableObject {
     }
 
     func updateChapterLookDwell(delta: TimeInterval) {
+        // 允许在自由活动期间继续累积观察进度：课间会自动进入 5 分钟自由活动，
+        // 若此处强制要求 freeRoam 未激活，主线在课间会完全无法推进，玩家会以为卡死。
+        // 真正的约束是"必须坐在自己座位上观察"。
         guard activeChapter == .silentClassroom, isPrologueActive == false,
               case .playing = gameState, activeRole.isTeacher == false,
-              freeRoam.isActive == false else { return }
+              player.posture == .seated else { return }
 
         if cameraPose == .rear {
             rearLookDwell += delta
@@ -1511,7 +1575,9 @@ final class GameManager: ObservableObject {
             freeRoamTimer = nil
             return
         }
-        guard case .playing = gameState else { return }
+        // 事件模态期间冻结倒计时：不要在这里推进回座，
+        // 否则事件刚结束时玩家会被立刻判定"时间到"。
+        guard case .playing = gameState, freeRoamPausedAt == nil else { return }
         if freeRoam.remainingSeconds <= 0 {
             returnToSeatFromFreeRoam(reason: "时间到了，你回到座位。走廊里的空气留在身后，晚自习重新包围过来。")
         } else {
@@ -1538,7 +1604,7 @@ final class GameManager: ObservableObject {
             } catch {
                 return
             }
-            guard let self, self.isReturningToSeat else { return }
+            guard let self, self.isReturningToSeat, !Task.isCancelled, self.gameState == .playing else { return }
             self.completeReturnToSeat(exitedClassroom: exitedClassroom, reason: reason)
             do {
                 let revealDuration = GameManager.returnToSeatTotalDuration - GameManager.returnToSeatResetDelay
@@ -1647,6 +1713,15 @@ final class GameManager: ObservableObject {
 
         if chapterOneStep == .followLinChe, action == .leaveSeat {
             completeChapterOne()
+            return
+        }
+
+        // 关卡一进行中，常规玩法动作需限定在当前开放的集合内，
+        // 避免通过键盘快捷键绕过主线。但主线自身的推进动作
+        //（observe / breathe 等，见 collectChapterClue）必须放行。
+        if chapterOneStep != .completed,
+           chapterOneAvailableActions.contains(action) == false,
+           chapterOneMainQuestActions.contains(action) == false {
             return
         }
 
@@ -2150,6 +2225,9 @@ final class GameManager: ObservableObject {
 
         if player.psychicEnergy <= 5 || player.stress >= 96 {
             if player.support > 55 {
+                // 仅在第一次触发时给出支持网络事件，避免同一局内无限复现。
+                guard hasTriggeredSupportNetworkProtection == false else { return }
+                hasTriggeredSupportNetworkProtection = true
                 player.psychicEnergy = 24
                 player.stress = 62
                 appendEvent(title: "支持网络保护", detail: "同桌的主动关心把你从崩溃边缘拉回来了。")
@@ -2176,16 +2254,23 @@ final class GameManager: ObservableObject {
         }
         commitClassmateMemory()
         selectedReplayIndex = max(0, replay.count - 1)
+        // 结算后所有实时循环必须停止，否则会在结局界面继续推进回合/触发事件。
+        stopRealtimeLoops()
         gameState = .ending(calculateEnding())
         audio.stop()
     }
 
-    private func calculateEnding() -> Ending {
+    /// 计算当前状态对应的结局。
+    /// 声明为 internal（而非 private）以便单元测试直接验证各结局分支。
+    func calculateEnding() -> Ending {
         if activeChapter == .silentClassroom, hasPresentedChapterOneDecision {
             return chapterOneEnding()
         }
 
-        if activeRole.isTeacher || teacher.studentsWarned + teacher.studentsHelped > 4 {
+        // 教师线结局只在玩家实际扮演教师时触发。
+        // 学生线中，教师互动次数不再直接覆盖结局，而是作为分析维度参与评分，
+        // 否则默认参数下学生线结局几乎不可达。
+        if activeRole.isTeacher {
             return teacherEnding()
         }
 
@@ -4030,21 +4115,31 @@ final class GameManager: ObservableObject {
     }
 
     private func loadClassmateMemory() -> [Int: ClassmateMemory] {
-        guard let data = UserDefaults.standard.data(forKey: memoryStoreKey) else {
+        guard let data = self.store.data(forKey: memoryStoreKey) else {
             return [:]
         }
-        return (try? JSONDecoder().decode([Int: ClassmateMemory].self, from: data)) ?? [:]
+        do {
+            return try JSONDecoder().decode([Int: ClassmateMemory].self, from: data)
+        } catch {
+            // 解码失败通常意味着存档来自旧版本且结构已变化。
+            // 记录并清除坏数据，避免每次都重复失败，同时不阻断游戏启动。
+            NSLog("[LateStudySimulator] 跨局记忆解码失败，已重置: \(error)")
+            self.store.removeObject(forKey: memoryStoreKey)
+            return [:]
+        }
     }
 
     private func saveClassmateMemory() {
         if classmateMemory.isEmpty {
-            UserDefaults.standard.removeObject(forKey: memoryStoreKey)
+            self.store.removeObject(forKey: memoryStoreKey)
             return
         }
-        guard let data = try? JSONEncoder().encode(classmateMemory) else {
-            return
+        do {
+            let data = try JSONEncoder().encode(classmateMemory)
+            self.store.set(data, forKey: memoryStoreKey)
+        } catch {
+            NSLog("[LateStudySimulator] 跨局记忆写入失败: \(error)")
         }
-        UserDefaults.standard.set(data, forKey: memoryStoreKey)
     }
 
     private func clampPlayer() {

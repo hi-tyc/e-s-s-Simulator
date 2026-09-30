@@ -664,11 +664,19 @@ final class MovementAndEventTests: XCTestCase {
         XCTAssertTrue(game.isDoorBlockingFreeRoamPosition(.front, x: 4.02, z: StudentDoor.front.centerZ))
     }
 
+    /// 走真实的 `startGame()` 初始化路径，并隔离 UserDefaults。
+    ///
+    /// 随后关掉关卡一引导：多数自由视角/移动测试针对的是普通玩法状态，
+    /// 而非主线步骤流程（主线另有专门测试覆盖）。
     private func makePlayingGame() -> GameManager {
-        let game = GameManager()
-        game.gameState = .playing
-        game.activeRole = .regularStudent
-        game.viewMode = .student
+        let suiteName = "LateStudySimulatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let game = GameManager(store: defaults)
+        game.startGame()
+        game.dismissChapterOneGuide()
+        // 开场独白会临时锁定视角输入，这里清掉以便测试视角/移动，
+        // 独白本身已有独立测试覆盖。
+        game.dismissFeaturedMonologueForTesting()
         return game
     }
 

@@ -242,18 +242,27 @@ enum StudyPeriod: String, Hashable {
         }
     }
 
+    /// 按已进行分钟数推导当前阶段。
+    ///
+    /// 采用显式的三段论：把总时长划分为 3 节正课 + 2 个各 10 分钟的课间，
+    /// 保证 `.breakTwo` 在任何 `totalMinutes` 下都可达。
+    /// （原先的阈值链在 totalMinutes ∈ 131...140 时会吞掉第二节后的课间。）
     static func period(forElapsedMinutes minutes: Int, totalMinutes: Int) -> StudyPeriod {
-        if totalMinutes <= 70 {
-            return minutes < totalMinutes - 10 ? .first : .breakOne
-        }
+        let total = max(30, totalMinutes)
+        let breakLength = 10
+        // 两段课间固定占用 2 * breakLength，剩余时间均分给 3 节正课。
+        let lessonLength = max(5, (total - 2 * breakLength) / 3)
+        let m = min(max(0, minutes), total)
 
-        if minutes < 50 { return .first }
-        if minutes < 60 { return .breakOne }
-        if totalMinutes <= 130 {
-            return minutes < totalMinutes - 10 ? .second : .breakTwo
-        }
-        if minutes < 110 { return .second }
-        if minutes < 120 { return .breakTwo }
+        let firstEnd = lessonLength
+        let breakOneEnd = firstEnd + breakLength
+        let secondEnd = breakOneEnd + lessonLength
+        let breakTwoEnd = secondEnd + breakLength
+
+        if m < firstEnd { return .first }
+        if m < breakOneEnd { return .breakOne }
+        if m < secondEnd { return .second }
+        if m < breakTwoEnd { return .breakTwo }
         return .third
     }
 }
@@ -575,6 +584,12 @@ struct EndingStory: Equatable, Identifiable {
     let title: String
     let body: String
     let prompt: String
+
+    // 基于内容比较：`id` 是每次构造新生成的 UUID，若参与比较，
+    // 两个内容相同的实例永远不相等，会让 `onChange` 每次都误判为变化。
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.title == rhs.title && lhs.body == rhs.body && lhs.prompt == rhs.prompt
+    }
 }
 
 struct EmpathyReflection: Equatable, Identifiable {
@@ -582,6 +597,10 @@ struct EmpathyReflection: Equatable, Identifiable {
     let role: String
     let icon: String
     let text: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.role == rhs.role && lhs.icon == rhs.icon && lhs.text == rhs.text
+    }
 }
 
 struct RelationshipEcho: Equatable, Identifiable {
@@ -589,6 +608,10 @@ struct RelationshipEcho: Equatable, Identifiable {
     let name: String
     let title: String
     let text: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.name == rhs.name && lhs.title == rhs.title && lhs.text == rhs.text
+    }
 }
 
 struct EndingMetric: Equatable, Identifiable {
@@ -596,6 +619,10 @@ struct EndingMetric: Equatable, Identifiable {
     let title: String
     let value: String
     let note: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.title == rhs.title && lhs.value == rhs.value && lhs.note == rhs.note
+    }
 }
 
 struct EndingComparison: Equatable, Identifiable {
@@ -604,12 +631,21 @@ struct EndingComparison: Equatable, Identifiable {
     let playerValue: String
     let referenceValue: String
     let note: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.title == rhs.title && lhs.playerValue == rhs.playerValue
+            && lhs.referenceValue == rhs.referenceValue && lhs.note == rhs.note
+    }
 }
 
 struct SupportResource: Equatable, Identifiable {
     let id = UUID()
     let title: String
     let detail: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.title == rhs.title && lhs.detail == rhs.detail
+    }
 }
 
 struct TeacherPostgameReflection: Equatable {
@@ -704,12 +740,44 @@ struct ClassmateProfile: Equatable {
     }
 }
 
+/// 跨局同学记忆。
+///
+/// 注意：使用自定义解码而非合成的 `Codable`。Swift 对 `[Int: T]` 字典编码为
+/// 扁平数组（key/value 交替），一旦 `T` 增删字段，整表解码就会失败。
+/// 这里逐字段 `decodeIfPresent` 并回退默认值，保证旧存档不会静默丢失。
 struct ClassmateMemory: Equatable, Codable {
-    var relationshipCarry: Double
-    var stressEcho: Double
-    var suspicionCarry: Double
-    var sharedTruth: Bool
-    var helpedLastRun: Bool
+    var relationshipCarry: Double = 0
+    var stressEcho: Double = 0
+    var suspicionCarry: Double = 0
+    var sharedTruth: Bool = false
+    var helpedLastRun: Bool = false
+
+    init(
+        relationshipCarry: Double = 0,
+        stressEcho: Double = 0,
+        suspicionCarry: Double = 0,
+        sharedTruth: Bool = false,
+        helpedLastRun: Bool = false
+    ) {
+        self.relationshipCarry = relationshipCarry
+        self.stressEcho = stressEcho
+        self.suspicionCarry = suspicionCarry
+        self.sharedTruth = sharedTruth
+        self.helpedLastRun = helpedLastRun
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case relationshipCarry, stressEcho, suspicionCarry, sharedTruth, helpedLastRun
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        relationshipCarry = try container.decodeIfPresent(Double.self, forKey: .relationshipCarry) ?? 0
+        stressEcho = try container.decodeIfPresent(Double.self, forKey: .stressEcho) ?? 0
+        suspicionCarry = try container.decodeIfPresent(Double.self, forKey: .suspicionCarry) ?? 0
+        sharedTruth = try container.decodeIfPresent(Bool.self, forKey: .sharedTruth) ?? false
+        helpedLastRun = try container.decodeIfPresent(Bool.self, forKey: .helpedLastRun) ?? false
+    }
 }
 
 enum ClassmateState: String {
@@ -779,9 +847,15 @@ struct AudioAssetStatus {
     let loopTotal: Int
     let missingCues: [String]
     let missingLoops: [String]
+    /// 当前音频输出模式（多声道 / 立体声 / 单声道回退链）。
+    var outputDescription: String = ""
 
     var summary: String {
         "短音 \(cueAvailable)/\(cueTotal) · 环境 \(loopAvailable)/\(loopTotal)"
+    }
+
+    var outputSummary: String {
+        outputDescription.isEmpty ? "" : "输出：\(outputDescription)"
     }
 
     var missingTotal: Int {

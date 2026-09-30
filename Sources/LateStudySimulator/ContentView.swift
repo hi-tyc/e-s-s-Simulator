@@ -86,9 +86,14 @@ struct ContentView: View {
                 featuredMonologueLayer(monologue)
                     .transition(.opacity)
                     .zIndex(20)
+                    // 动画收敛到独白层（原先挂在根 ZStack 上会误伤无关子视图），
+                    // 并尊重"减少动态效果"偏好。
+                    .animation(
+                        .easeInOut(duration: game.accessibilityPreferences.reduceMotion ? 0.01 : 0.55),
+                        value: monologue.id
+                    )
             }
         }
-        .animation(.easeInOut(duration: 0.55), value: game.featuredMonologue?.id)
         .onChange(of: game.accessibilityPreferences) { _, _ in
             game.applyAccessibilityPreferences()
         }
@@ -364,60 +369,10 @@ struct ContentView: View {
     }
 
     private var chapterOneSeatSelectionOverlay: some View {
+        // 座位选择功能已下线：玩家固定坐在第三排中间（见 GameManager.defaultPlayerSeat）。
+        // 原先这里保留了一整段被注释的 UI，但引用的 selectChapterSeat /
+        // confirmChapterSeatSelection 在 GameManager 中并不存在，无法恢复。
         EmptyView()
-        /*
-            ZStack {
-            Color.black.opacity(0.84).ignoresSafeArea()
-            VStack(spacing: 16) {
-                Text("选择你的座位")
-                    .font(.custom("Songti SC", size: 28).weight(.bold))
-                Text("请选择教室中间、四周都有同学的位置。左侧座位将保留林澈。")
-                    .font(.custom("Kaiti SC", size: 15))
-                    .foregroundStyle(.white.opacity(0.7))
-                VStack(spacing: 8) {
-                    Text("讲台")
-                        .font(.system(size: 12, weight: .bold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .background(.white.opacity(0.12))
-                    ForEach(0..<5, id: \.self) { row in
-                        HStack(spacing: 8) {
-                            ForEach([0, 1, 2, 3] as [Int], id: \.self) { column in
-                                let isSelectable = row > 0 && row < 4 && column > 0 && column < 3
-                                Button {
-                                    game.selectChapterSeat(row: row, column: column)
-                                } label: {
-                                    VStack(spacing: 2) {
-                                        Image(systemName: isSelectable ? "chair.fill" : "rectangle.fill")
-                                            .font(.system(size: 15))
-                                        Text(isSelectable ? "(row + 1)-(column + 1)" : "")
-                                            .font(.system(size: 9, design: .rounded))
-                                    }
-                                    .frame(width: 68, height: 42)
-                                }
-                                .buttonStyle(SegmentButtonStyle(isSelected: game.selectedChapterSeat?.row == row && game.selectedChapterSeat?.column == column))
-                                .disabled(!isSelectable)
-                            }
-                        }
-                    }
-                }
-                Text(game.selectedChapterSeat == nil ? "请选择一个座位" : "已选择中间座位 · 左侧为林澈")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.65))
-                Button {
-                    game.confirmChapterSeatSelection()
-                } label: {
-                    Label("确定", systemImage: "checkmark.circle.fill")
-                        .frame(width: 170, height: 40)
-                }
-                .buttonStyle(ActionButtonStyle())
-                .disabled(game.selectedChapterSeat == nil)
-            }
-            .padding(28)
-            .frame(width: 620)
-            .liquidGlassPanel(cornerRadius: 10)
-        }
-        */
     }
 
     private var chapterOnePaperOverlay: some View {
@@ -1068,6 +1023,13 @@ struct ContentView: View {
                         Text(game.audioAssetStatus.summary)
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.62))
+                        if !game.audioAssetStatus.outputSummary.isEmpty {
+                            Text(game.audioAssetStatus.outputSummary)
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     Spacer()
                     Text(game.audioAssetStatus.missingSummary)
@@ -1871,7 +1833,12 @@ struct ContentView: View {
     }
 
     private var returnToSeatTransitionLayer: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: game.isReturningToSeat == false)) { timeline in
+        // 减少动态效果时暂停 60fps 时间线，改为显示静态的"已回到座位"提示，
+        // 避免对前庭敏感的用户播放全屏闭眼/轨道光条动效。
+        TimelineView(.animation(
+            minimumInterval: 1.0 / 60.0,
+            paused: game.isReturningToSeat == false || game.accessibilityPreferences.reduceMotion
+        )) { timeline in
             GeometryReader { proxy in
                 let progress = returnToSeatProgress(at: timeline.date)
                 let motion = smoothStep(from: 0.04, to: 0.25, value: progress) * (1 - smoothStep(from: 0.48, to: 0.66, value: progress))
@@ -2720,13 +2687,16 @@ struct ContentView: View {
 }
 
 struct ActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(.white)
+            .foregroundStyle(isEnabled ? .white : .white.opacity(0.38))
+            .opacity(isEnabled ? 1 : 0.65)
             .padding(1)
             .glassEffect(.regular, in: .rect(cornerRadius: 8))
             .buttonStyle(.glass)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.98 : 1)
     }
 }
 

@@ -108,11 +108,21 @@ final class ClassroomCoordinator {
     private var classmateStates: [Int: ClassmateState] = [:]
     private var classmateProfileSignature = ""
     private var lastFanSpinDuration: Double = 0
+    private var lastBlackboardStatus = ""
+    private var lastDoorStates: (front: Bool, rear: Bool) = (false, false)
+    private var lastLockerOpen = false
+    private var chairNodesBySeat: [String: SCNNode] = [:]
+    private var lastFrameTimestamp = Date()
+    private var currentFStop: Double = 1.6
+    private var currentVignette: Double = 0.55
+    private var currentVignettePower: Double = 0.9
+    private var currentSaturation: Double = 1.0
     private var lastPose: CameraPose = .forward
     private var lastViewMode: ViewMode = .student
     private var lastFreeRoamActive = false
     private var lastPrologueBeat: PrologueBeatID?
     private var lastPrologueActive = false
+    private var prologueExteriorNode: SCNNode?
     private var lastStudentLookYaw: Double = 0
     private var lastStudentLookPitch: Double = 0
     private weak var currentGame: GameManager?
@@ -183,6 +193,7 @@ final class ClassroomCoordinator {
             lastPose = game.cameraPose
             lastViewMode = game.viewMode
             lastFreeRoamActive = game.freeRoam.isActive
+            let prologueEnded = lastPrologueActive && !game.isPrologueActive
             lastPrologueActive = game.isPrologueActive
             lastPrologueBeat = game.isPrologueActive ? game.prologueCurrentBeat : nil
             SCNTransaction.begin()
@@ -190,6 +201,9 @@ final class ClassroomCoordinator {
             SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             applyCameraMode(game: game, teacherPosition: teacherNode.position)
             SCNTransaction.commit()
+            // 序章结束后门外剪影不再可见，停掉它们的 repeatForever 动作，
+            // 避免整个生命周期内每帧做无意义的变换求值。
+            if prologueEnded { suspendPrologueExterior() }
         } else if poseChanged || studentLookChanged || game.freeRoam.isActive || game.isPrologueActive {
             lastPose = game.cameraPose
             lastViewMode = game.viewMode
@@ -228,27 +242,42 @@ final class ClassroomCoordinator {
         if let camera = cameraRig.camera {
             let fatigue = game.viewMode == .teacher ? game.teacher.fatigue / 140 : 1 - game.player.focusQuality
             let eventIntensity = eventVisualIntensity(game: game)
-            camera.fStop = 1.6 + fatigue * 7.0 + eventIntensity.blur
+            // 目标值 → 指数平滑逼近，避免事件触发瞬间景深/暗角"对焦抽搐"。
+            let delta = max(0.0001, min(0.1, Date().timeIntervalSince(lastFrameTimestamp)))
+            lastFrameTimestamp = Date()
+            let smoothing = 1 - exp(-6.0 * delta)
+            let targetFStop = 1.6 + fatigue * 7.0 + eventIntensity.blur
+            let targetVignette = min(1.0, 0.45 + fatigue * 1.15 + eventIntensity.vignette)
+            let targetVignettePower = min(1.0, 0.8 + fatigue * 1.5 + eventIntensity.vignette)
+            let targetSaturation = max(0.25, 1.0 - fatigue * 0.34 - eventIntensity.desaturation)
+            currentFStop += (targetFStop - currentFStop) * smoothing
+            currentVignette += (targetVignette - currentVignette) * smoothing
+            currentVignettePower += (targetVignettePower - currentVignettePower) * smoothing
+            currentSaturation += (targetSaturation - currentSaturation) * smoothing
+            camera.fStop = currentFStop
             camera.focusDistance = game.viewMode == .teacher ? 4.2 : studentFocusDistance(game: game)
-            camera.vignettingIntensity = 0.45 + fatigue * 1.15 + eventIntensity.vignette
-            camera.vignettingPower = 0.8 + fatigue * 1.5 + eventIntensity.vignette
-            camera.saturation = CGFloat(1.0 - fatigue * 0.34 - eventIntensity.desaturation)
+            camera.vignettingIntensity = CGFloat(currentVignette)
+            camera.vignettingPower = CGFloat(currentVignettePower)
+            camera.saturation = CGFloat(currentSaturation)
         }
+        // 只在状态真正变化时写入节点属性。原先每帧无条件赋值，
+        // 会在 SCNTransaction 的 0.55s 动画时长下持续触发材质脏标记与隐式动画。
         for classmate in game.classmates {
             guard let node = classmateNodes[classmate.id] else { continue }
+            guard classmateStates[classmate.id] != classmate.state else { continue }
+            classmateStates[classmate.id] = classmate.state
             node.scale = classmate.state == .crying ? SCNVector3(0.9, 0.72, 0.9) : SCNVector3(1, 1, 1)
             node.opacity = classmate.state == .sleeping ? 0.72 : 1
             node.childNodes.first?.geometry?.firstMaterial?.emission.contents = emissionColor(for: classmate.state)
-            if classmateStates[classmate.id] != classmate.state {
-                classmateStates[classmate.id] = classmate.state
-                applyStateAnimation(classmate.state, to: node)
-            }
+            applyStateAnimation(classmate.state, to: node)
         }
         SCNTransaction.commit()
     }
 
     private func buildScene() {
-        scene.rootNode.addChildNode(makePrologueExterior())
+        let exterior = makePrologueExterior()
+        prologueExteriorNode = exterior
+        scene.rootNode.addChildNode(exterior)
         scene.rootNode.addChildNode(makeEnvironment())
         scene.rootNode.addChildNode(makeCorridor())
         scene.rootNode.addChildNode(makeFurniture())
@@ -600,6 +629,9 @@ final class ClassroomCoordinator {
         currentGame?.updatePrologueLookExploration(isMoving: isLooking, delta: 1.0 / 60.0)
         currentGame?.updatePrologueDwell(delta: 1.0 / 60.0)
         currentGame?.updateChapterLookDwell(delta: 1.0 / 60.0)
+        // studentLookYaw/Pitch 不再是 @Published，updateNSView 不会被视角变化触发，
+        // 因此在 60fps tick 中主动把最新视角应用到相机与场景。
+        applyStudentLookIfChanged()
         guard let game = currentGame, game.freeRoam.isActive else {
             lastMovementTick = Date()
             return
@@ -633,6 +665,23 @@ final class ClassroomCoordinator {
         pendingMouseDeltaX = 0
         pendingMouseDeltaY = 0
         game.rotateStudentView(deltaX: deltaX, deltaY: deltaY)
+    }
+
+    /// 把 `game.studentLookYaw/Pitch` 的最新值应用到相机。
+    ///
+    /// 这两个字段已不再是 `@Published`（避免鼠标移动触发整个 SwiftUI body 重建），
+    /// 因此由 60fps tick 主动检查变化并刷新，行为与原先的 `updateNSView` 路径一致。
+    private func applyStudentLookIfChanged() {
+        guard let game = currentGame else { return }
+        let changed = lastStudentLookYaw != game.studentLookYaw || lastStudentLookPitch != game.studentLookPitch
+        guard changed else { return }
+        lastStudentLookYaw = game.studentLookYaw
+        lastStudentLookPitch = game.studentLookPitch
+        guard game.viewMode == .student else { return }
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        applyCameraMode(game: game, teacherPosition: teacherNode.position)
+        SCNTransaction.commit()
     }
 
     private func installMouseLookKeyMonitor() {
@@ -797,6 +846,16 @@ final class ClassroomCoordinator {
                 }
             }
         ]
+    }
+
+    /// 兜底清理。`dismantleNSView` 通常会调用 `teardownInput()`，
+    /// 但若视图层级异常导致它未被调用，这里保证定时器与事件监听不会泄漏。
+    /// 使用 `isolated deinit` 以满足 Swift 6 严格并发（属性非 Sendable）。
+    isolated deinit {
+        movementTimer?.invalidate()
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     func teardownInput() {
@@ -1220,7 +1279,16 @@ final class ClassroomCoordinator {
     }
 
     private func updateDoors(game: GameManager) {
-        updateDoors(frontOpen: game.frontDoorOpen, rearOpen: game.rearDoorOpen)
+        // 只在开关状态变化时写入。原先每帧无条件赋值会在 0.55s 隐式动画时长下
+        // 反复重启插值，导致门叶「蠕动」到位。
+        let next = (front: game.frontDoorOpen, rear: game.rearDoorOpen)
+        guard next != lastDoorStates else { return }
+        lastDoorStates = next
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.35
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        updateDoors(frontOpen: next.front, rearOpen: next.rear)
+        SCNTransaction.commit()
     }
 
     private func updateDoors(frontOpen: Bool, rearOpen: Bool) {
@@ -1243,7 +1311,12 @@ final class ClassroomCoordinator {
     }
 
     private func updatePlayerLocker(game: GameManager) {
+        guard game.playerLockerOpen != lastLockerOpen else { return }
+        lastLockerOpen = game.playerLockerOpen
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.28
         updatePlayerLocker(isOpen: game.playerLockerOpen)
+        SCNTransaction.commit()
     }
 
     private func updatePlayerLocker(isOpen: Bool) {
@@ -1256,6 +1329,16 @@ final class ClassroomCoordinator {
         }
     }
 
+    /// 座位到椅子节点的稳定 key。
+    private static func seatKey(row: Int, column: Int) -> String { "\(row)_\(column)" }
+
+    /// 序章结束后停止门外剪影与树木的动作，并隐藏该区域。
+    private func suspendPrologueExterior() {
+        guard let exterior = prologueExteriorNode, exterior.isHidden == false else { return }
+        exterior.enumerateChildNodes { node, _ in node.removeAllActions() }
+        exterior.isHidden = true
+    }
+
     private func makeFurniture() -> SCNNode {
         let root = SCNNode()
         for row in 0..<5 {
@@ -1264,7 +1347,9 @@ final class ClassroomCoordinator {
                 let z = Float(row) * 1.45 - 2.25
                 root.addChildNode(makeDesk(at: SCNVector3(x, 0, z), isPlayer: false))
                 let chair = makeChair(at: SCNVector3(x, 0, z + 0.55))
-                if row == 2 && column == 1 { chair.name = "playerGroundedChair" }
+                // 记录椅子节点，供 updateDeskState 按座位直接索引，
+                // 避免每帧遍历整棵场景树（约 1000+ 节点）。
+                chairNodesBySeat[Self.seatKey(row: row, column: column)] = chair
                 root.addChildNode(chair)
             }
         }
@@ -1528,8 +1613,21 @@ final class ClassroomCoordinator {
         teacherGazeNode.childNodes.first?.geometry?.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.18)
         teacherGazeNode.childNodes.first?.geometry?.firstMaterial?.emission.contents = color.withAlphaComponent(0.12)
 
-        let playerPosition = SCNVector3(-0.6, game.player.posture == .standing ? 1.58 : 1.18, 1.5)
-        teacherNode.eulerAngles = teacherEulerAngles(from: teacherPosition, to: playerPosition)
+        // 教师视线必须指向玩家真实位置：座位由 selectedChapterSeat 决定，
+        // 自由活动时则跟随玩家实际坐标，否则换座/离座后视线会盯住空桌。
+        teacherNode.eulerAngles = teacherEulerAngles(from: teacherPosition, to: playerWorldPosition(game: game))
+    }
+
+    /// 玩家在 3D 场景中的实时位置（头/眼高度）。
+    private func playerWorldPosition(game: GameManager) -> SCNVector3 {
+        let height: Float = game.player.posture == .standing ? 1.58 : 1.18
+        if game.freeRoam.isActive {
+            return SCNVector3(Float(game.freeRoam.positionX), height, Float(game.freeRoam.positionZ))
+        }
+        let seat = game.selectedChapterSeat ?? GameManager.defaultPlayerSeat
+        let deskX = Float(seat.column) * 1.2 - 2.4
+        let deskZ = Float(seat.row) * 1.45 - 2.25 + 0.55
+        return SCNVector3(deskX, height, deskZ)
     }
 
     private func makePlayerDeskProps() -> SCNNode {
@@ -1694,15 +1792,22 @@ final class ClassroomCoordinator {
     private func updateClock(game: GameManager) {
         let startMinutes = 18 * 60 + 30
         let totalMinutes = Double(startMinutes + game.elapsedMinutes)
-        let minuteAngle = -CGFloat((totalMinutes / 60) * 2 * Double.pi)
-        let hourAngle = -CGFloat((totalMinutes / 720) * 2 * Double.pi)
+        // 分针：60 分钟一圈；时针：12 小时一圈，且必须叠加分钟偏移。
+        // 原先写的 totalMinutes / 720 等于「把 18:30 当成 3 点」，导致指针整体偏慢 15°~30°。
+        let minuteOfHour = totalMinutes.truncatingRemainder(dividingBy: 60) / 60
+        let hourOfHalfDay = totalMinutes.truncatingRemainder(dividingBy: 720) / 60  // 0..<12 小时
+        let minuteAngle = -CGFloat(minuteOfHour * 2 * Double.pi)
+        let hourAngle = -CGFloat((hourOfHalfDay + minuteOfHour) / 12 * 2 * Double.pi)
         clockMinuteHandNode.eulerAngles.z = minuteAngle
         clockHourHandNode.eulerAngles.z = hourAngle
     }
 
     private func updateBlackboard(game: GameManager) {
-        blackboardStatusNode.childNodes.forEach { $0.removeFromParentNode() }
         let status = "时间 \(game.clockText)   作业 \(Int(game.player.homework))%   压力 \(Int(game.player.stress))"
+        // 只在文本真正变化时重建 SCNText，避免每帧重新排版/三角剖分导致闪烁与内存抖动。
+        guard status != lastBlackboardStatus else { return }
+        lastBlackboardStatus = status
+        blackboardStatusNode.childNodes.forEach { $0.removeFromParentNode() }
         blackboardStatusNode.addChildNode(makeText(status, size: 0.07, color: NSColor(calibratedRed: 0.94, green: 0.88, blue: 0.62, alpha: 1), position: SCNVector3Zero))
     }
 
@@ -1758,17 +1863,10 @@ final class ClassroomCoordinator {
     }
 
     private func updateDeskState(game: GameManager) {
-        let selected = game.selectedChapterSeat ?? (row: 2, column: 1)
-        let selectedX = Float(selected.column) * 1.2 - 2.4
-        let selectedZ = Float(selected.row) * 1.45 - 1.70
-        var selectedChair: SCNNode?
-        scene.rootNode.enumerateChildNodes { node, _ in
-            guard selectedChair == nil, node.geometry != nil else { return }
-            if abs(node.position.x - CGFloat(selectedX)) < 0.01 && abs(node.position.z - CGFloat(selectedZ)) < 0.01 {
-                selectedChair = node
-            }
-        }
-        selectedChair?.name = "playerGroundedChair"
+        let selected = game.selectedChapterSeat ?? GameManager.defaultPlayerSeat
+        // 按座位 key 直接索引椅子，替代原先每帧的整树遍历。
+        chairNodesBySeat.values.forEach { $0.name = nil }
+        chairNodesBySeat[Self.seatKey(row: selected.row, column: selected.column)]?.name = "playerGroundedChair"
         let shouldShowSeatedProps = game.viewMode == .student && game.player.posture == .seated && game.freeRoam.isActive == false
         playerSeatedPropsNode.isHidden = shouldShowSeatedProps == false
         guard shouldShowSeatedProps else {
@@ -1922,9 +2020,18 @@ final class ClassroomCoordinator {
 
     private func applyStateAnimation(_ state: ClassmateState, to node: SCNNode) {
         node.removeAllActions()
+        // head 上的 glance action 挂在子节点，removeAllActions() 清不到，
+        // 必须显式移除，否则离开 .lookingAtPlayer 后头会一直左右摆。
+        node.childNode(withName: "head", recursively: false)?.removeAction(forKey: "glance")
         node.eulerAngles.x = 0
         node.eulerAngles.z = 0
-        node.childNode(withName: "phone", recursively: false)?.opacity = state == .usingPhone ? 1 : 0
+
+        let phone = node.childNode(withName: "phone", recursively: false)
+        phone?.opacity = state == .usingPhone ? 1 : 0
+        // emission 必须随状态重置，否则离开 .usingPhone 后手机仍会发蓝光。
+        phone?.geometry?.firstMaterial?.emission.contents = state == .usingPhone
+            ? NSColor(calibratedRed: 0.05, green: 0.2, blue: 0.8, alpha: 1)
+            : NSColor.black
         node.childNode(withName: "paper", recursively: false)?.opacity = state == .studying ? 0.7 : 0.35
 
         switch state {
@@ -1932,7 +2039,6 @@ final class ClassroomCoordinator {
             node.eulerAngles.x = -0.03
         case .usingPhone:
             node.eulerAngles.x = -0.22
-            node.childNode(withName: "phone", recursively: false)?.geometry?.firstMaterial?.emission.contents = NSColor(calibratedRed: 0.05, green: 0.2, blue: 0.8, alpha: 1)
         case .anxious:
             let left = SCNAction.moveBy(x: -0.025, y: 0, z: 0, duration: 0.05)
             let right = SCNAction.moveBy(x: 0.05, y: 0, z: 0, duration: 0.08)
@@ -2080,8 +2186,10 @@ final class ClassroomCoordinator {
         let geometry = SCNCone(topRadius: 0.06, bottomRadius: 0.62, height: 2.7)
         geometry.radialSegmentCount = 24
         geometry.firstMaterial = material(NSColor(calibratedRed: 1.0, green: 0.46, blue: 0.22, alpha: 0.18))
-        geometry.firstMaterial?.blendMode = .add
-        geometry.firstMaterial?.isDoubleSided = true
+        // 使用 alpha 混合而非加法混合：加法混合会让锥体前壁与后壁各叠加一次，
+        // 造成"锥体内部比外部亮一倍"，穿过物体时亮度还会穿透叠加。
+        geometry.firstMaterial?.blendMode = .alpha
+        geometry.firstMaterial?.isDoubleSided = false
         geometry.firstMaterial?.writesToDepthBuffer = false
         let node = SCNNode(geometry: geometry)
         node.position = SCNVector3(0, 0, -1.35)
@@ -2230,14 +2338,6 @@ final class ClassroomCoordinator {
         root.addChildNode(box(width: 0.008, height: 0.045, length: 0.012, color: frame, position: SCNVector3(0.022, 0.035, -0.169)))
         root.addChildNode(box(width: 0.008, height: 0.045, length: 0.012, color: frame, position: SCNVector3(0.088, 0.035, -0.169)))
         root.addChildNode(box(width: 0.026, height: 0.007, length: 0.012, color: frame, position: SCNVector3(0, 0.035, -0.171)))
-        return root
-    }
-
-    private func makeGlasses() -> SCNNode {
-        let root = SCNNode()
-        root.addChildNode(box(width: 0.09, height: 0.012, length: 0.018, color: NSColor(calibratedWhite: 0.04, alpha: 1), position: SCNVector3(-0.045, 0.805, -0.118)))
-        root.addChildNode(box(width: 0.09, height: 0.012, length: 0.018, color: NSColor(calibratedWhite: 0.04, alpha: 1), position: SCNVector3(0.045, 0.805, -0.118)))
-        root.addChildNode(box(width: 0.028, height: 0.008, length: 0.014, color: NSColor(calibratedWhite: 0.04, alpha: 1), position: SCNVector3(0, 0.805, -0.12)))
         return root
     }
 
