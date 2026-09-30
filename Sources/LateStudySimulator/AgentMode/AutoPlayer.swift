@@ -56,6 +56,20 @@ enum AutoPlayer {
         cursor[strategy] = 0
 
         while actions < maxActions && session.isFinished == false {
+            // 章节转场与纸条：自动推进
+            if session.needsTransitionContinue {
+                _ = session.execute(command: "继续")
+                if verbose { log.append("  [转场] 继续") }
+                actions += 1
+                continue
+            }
+            if session.needsPaperRead {
+                _ = session.execute(command: "阅读")
+                if verbose { log.append("  [纸条] 阅读") }
+                actions += 1
+                continue
+            }
+
             // 事件优先处理
             if let event = session.pendingEvent {
                 let choice = chooseEventChoice(event, strategy: strategy)

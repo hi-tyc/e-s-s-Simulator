@@ -710,8 +710,12 @@ final class GameManager: ObservableObject {
     }
 
     func enterChapterTwo() {
+        // 第一章收尾：关闭转场，进入"阅读纸条 → 最终决策"的环节。
+        // 结算由最终决策（chapter1_* 选项）触发，不在这里。
         isChapterOneTransitionPresented = false
-        message = "第二章内容尚未开放。"
+        mouseLookEnabled = false
+        mouseLookCaptured = false
+        message = "你把纸条从口袋里取出来，借着走廊的灯看清楚上面的字。"
     }
 
     func restartPrologueTutorial() {
@@ -3631,7 +3635,10 @@ final class GameManager: ObservableObject {
         message = "你把纸条收进口袋，起身跟上林澈。"
         isChapterOnePaperPresented = true
         recordSnapshot(actionLabel: "跟上林澈")
-        finish()
+        // 不在此处结算。第一章是"垂直切片"的收尾段，玩家还要经历：
+        // 章节转场 → 阅读纸条 → 做出最终决策（交给老师 / 找班干部 /
+        // 明天再说 / 走廊等待），由该决策触发 finish()。
+        // 若在此直接结算，玩家会在第 6 回合就结束，看不到后续内容。
         mouseLookEnabled = false
         mouseLookCaptured = false
         isChapterOneTransitionPresented = true

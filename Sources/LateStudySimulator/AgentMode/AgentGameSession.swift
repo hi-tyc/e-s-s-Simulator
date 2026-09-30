@@ -71,6 +71,16 @@ final class AgentGameSession {
         return nil
     }
 
+    /// 是否处于章节转场，需要输入「继续」。
+    var needsTransitionContinue: Bool {
+        game.isChapterOneTransitionPresented
+    }
+
+    /// 是否正在展示纸条，需要输入「阅读」。
+    var needsPaperRead: Bool {
+        game.isChapterOnePaperPresented
+    }
+
     // MARK: - 渲染
 
     /// 默认视图：AI 能看到的一切（不含隐藏数值）。
@@ -233,6 +243,26 @@ final class AgentGameSession {
     func execute(command raw: String) -> CommandResult {
         let command = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard command.isEmpty == false else { return .error("空命令") }
+
+        // 章节转场：必须先"继续"才能进入下一步
+        if game.isChapterOneTransitionPresented {
+            if command == "继续" || command.lowercased() == "continue" {
+                game.enterChapterTwo()
+                return .ok(renderDefaultView())
+            }
+            return .error("当前处于章节转场。输入「继续」进入下一步。")
+        }
+
+        // 纸条：必须先"阅读/关闭"才能进入最终决策
+        if game.isChapterOnePaperPresented {
+            if command == "阅读" || command == "continue" || command == "继续" {
+                game.dismissChapterOnePaper()
+                if let event = pendingEvent { return .ok(renderEvent(event)) }
+                if isFinished { return .finished(renderEndingIfAny()) }
+                return .ok(renderDefaultView())
+            }
+            return .error("当前正在阅读纸条。输入「阅读」继续。")
+        }
 
         // 事件期间只接受选择
         if let event = pendingEvent {

@@ -461,8 +461,29 @@ final class MovementAndEventTests: XCTestCase {
         game.execute(.leaveSeat)
         XCTAssertEqual(game.chapterOneStep, .completed)
         XCTAssertEqual(game.chapterOneDecision, "跟随林澈进入走廊")
+        // 跟上林澈后不再立即结算：先播放章节转场，再由玩家阅读纸条
+        // 并做出最终决策（交给老师 / 找班干部 / 明天再说 / 走廊等待）。
+        XCTAssertTrue(game.isChapterOneTransitionPresented, "应显示章节转场")
+        guard case .playing = game.gameState else {
+            return XCTFail("跟上林澈后应继续游戏，由最终决策触发结算")
+        }
+
+        // 关闭转场，进入纸条环节
+        game.enterChapterTwo()
+        XCTAssertFalse(game.isChapterOneTransitionPresented)
+        XCTAssertTrue(game.isChapterOnePaperPresented, "应显示纸条")
+
+        // 关闭纸条，弹出最终决策
+        game.dismissChapterOnePaper()
+        guard case .event(let decisionEvent) = game.gameState else {
+            return XCTFail("关闭纸条后应弹出最终决策事件")
+        }
+        XCTAssertEqual(decisionEvent.choices.count, 4)
+
+        // 做出选择后才结算
+        game.resolveEventChoice(decisionEvent.choices[0])
         guard case .ending = game.gameState else {
-            return XCTFail("Following Lin Che should finish chapter one")
+            return XCTFail("最终决策后应结算")
         }
     }
 
