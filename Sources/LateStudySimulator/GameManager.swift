@@ -77,6 +77,7 @@ final class GameManager: ObservableObject {
     @Published var hasTriggeredPlayerBreakdown: Bool = false
     @Published var hasTriggeredClassmateHelpRequest: Bool = false
     @Published var hasTriggeredSupportNetworkProtection: Bool = false
+    @Published var hasTriggeredEnergyExhaustion: Bool = false
     @Published var hasTriggeredClassmateReport: Bool = false
     @Published var hasTriggeredMemoryTrust: Bool = false
     @Published var hasTriggeredMemorySuspicion: Bool = false
@@ -331,6 +332,7 @@ final class GameManager: ObservableObject {
         hasTriggeredPlayerBreakdown = false
         hasTriggeredClassmateHelpRequest = false
         hasTriggeredSupportNetworkProtection = false
+        hasTriggeredEnergyExhaustion = false
         hasTriggeredClassmateReport = false
         hasTriggeredMemoryTrust = false
         hasTriggeredMemorySuspicion = false
@@ -1740,7 +1742,7 @@ final class GameManager: ObservableObject {
             spendAttention(for: .desk, multiplier: 0.6)
             player.psychicEnergy += 7
             player.maskCost += 14
-            player.exposure += teacher.isNearPlayer ? 35 : 18
+            player.exposure += teacher.isNearPlayer ? 24 : 14
             player.stress += teacher.isNearPlayer ? 16 : 5
             message = teacher.isNearPlayer ? "手机屏幕刚亮，脚步声就在旁边停下。" : "屏幕蓝光让你短暂脱离了教室，也让风险迅速上升。"
             addMonologue("只是看一眼消息，好像就能从这里逃出去几秒。", intensity: teacher.isNearPlayer ? 0.82 : 0.6)
@@ -1777,10 +1779,12 @@ final class GameManager: ObservableObject {
             addAudioCue(.whisper, direction: "左侧近处", intensity: 0.44, note: "低语比文字更真实，也更容易被发现。")
         case .breathe:
             recoverAttention(18)
-            player.psychicEnergy += 17
-            player.stress = max(0, player.stress - 16)
+            // 深呼吸是"零风险恢复"入口，必须有代价，否则会压过所有其他动作。
+            // 代价：占用一整回合（作业停滞）＋ 略微推高暴露与压力回落幅度收窄。
+            player.psychicEnergy += 11
+            player.stress = max(0, player.stress - 10)
             player.maskCost = max(0, player.maskCost - 3)
-            player.exposure = max(0, player.exposure - 4)
+            player.exposure += 3
             message = "你做了几次缓慢呼吸。问题还在，但身体先回到此刻。"
             addMonologue("先把呼吸找回来，题目可以等一秒。", intensity: 0.3)
             addAudioCue(.heartbeat, direction: "颅内", intensity: 0.28, note: "心跳慢下来一点，听觉边界重新清晰。")
@@ -2242,6 +2246,23 @@ final class GameManager: ObservableObject {
                     ]
                 )
                 addAudioCue(.paper, direction: "左侧近处", intensity: 0.58, note: "一张纸的摩擦声成了求助入口。")
+            } else if hasTriggeredEnergyExhaustion == false {
+                // 能量彻底耗尽时先给一次"撑不住了"的强制事件，而不是直接结束。
+                // 否则玩家会在数值早已无法挽回的情况下继续点十几回合，毫无反馈。
+                hasTriggeredEnergyExhaustion = true
+                player.psychicEnergy = 14
+                player.stress = max(40, player.stress - 18)
+                appendEvent(title: "撑不住了", detail: "你意识到自己已经没法再假装正常。身体先替你做了决定。")
+                presentEvent(
+                    kind: .playerBreakdown,
+                    title: "撑不住了",
+                    body: "笔尖停在纸上很久没有动。你不是不想继续，是身体已经不允许。你需要现在做一件事：承认它，或者继续硬撑。",
+                    choices: [
+                        EventChoice(id: "admit_exhaustion", title: "承认累了", detail: "压力下降，支持上升，作业进度停滞"),
+                        EventChoice(id: "push_through", title: "继续硬撑", detail: "维持脸色，但压力与面具成本继续累积")
+                    ]
+                )
+                addAudioCue(.heartbeat, direction: "颅内", intensity: 0.82, note: "能量见底时，心跳声盖过了笔尖。")
             } else {
                 finish()
             }
@@ -3239,6 +3260,19 @@ final class GameManager: ObservableObject {
             player.maskCost += 8
             player.support = max(0, player.support - 12)
             message = "你把纸条推回去。面具保住了，连接断了一截。"
+        case "admit_exhaustion":
+            player.psychicEnergy += 16
+            player.stress = max(0, player.stress - 22)
+            player.maskCost = max(0, player.maskCost - 10)
+            player.support += 10
+            player.homework = max(0, player.homework - 6)
+            message = "你承认自己撑不住了。这句话没有让作业变多，但让肩膀松了一点。"
+            addMonologue("承认累，比硬撑更需要力气。", intensity: 0.62)
+        case "push_through":
+            player.maskCost += 14
+            player.stress += 12
+            player.psychicEnergy += 4
+            message = "你继续硬撑。脸色勉强维持住了，但身体把账记在了别处。"
         case "look_around":
             spendAttention(for: .middle, multiplier: 1.2)
             player.exposure += 4
@@ -4193,18 +4227,19 @@ final class GameManager: ObservableObject {
     }
 
     private func makeClassmates() -> [Classmate] {
-        let names = ["林澈", "周予安", "江越", "陈言", "许栀", "何屿", "唐宁", "沈星", "顾言", "叶舟", "韩夏", "白辰", "陆遥", "秦一", "苏禾", "姜南", "程川", "宋也", "黎昕"]
+        let names = ["周予安", "江越", "陈言", "许栀", "何屿", "唐宁", "沈星", "顾言", "叶舟", "韩夏", "白辰", "陆遥", "秦一", "苏禾", "姜南", "程川", "宋也", "黎昕", "温屿"]
         var result: [Classmate] = []
         var id = 0
-        let playerSeat = selectedChapterSeat ?? (row: 2, column: 1)
+        let playerSeat = selectedChapterSeat ?? GameManager.defaultPlayerSeat
         let linCheSeat = (row: playerSeat.row, column: playerSeat.column - 1)
         for row in 0..<5 {
             for column in 0..<4 {
                 if row == playerSeat.row && column == playerSeat.column { continue }
                 let isLinChe = row == linCheSeat.row && column == linCheSeat.column
-                let name = isLinChe ? "林澈" : names[max(1, id + 1) % names.count]
+                // 林澈是固定角色，名字池中不再包含"林澈"，避免出现两个同名同学。
+                let name = isLinChe ? "林澈" : names[id % names.count]
                 let isDeskmate = row == playerSeat.row && (column == playerSeat.column - 1 || column == playerSeat.column + 1)
-                let profile = classmateProfile(id: isLinChe ? 0 : max(1, id + 1))
+                let profile = classmateProfile(id: isLinChe ? 0 : id % names.count + 1)
                 let memory = classmateMemory[id]
                 let baseRelationship = isDeskmate ? 42 : Double.random(in: 10...45)
                 let baseStress = isDeskmate ? Double.random(in: 54...86) + profile.anxiety / 12 : Double.random(in: 20...85) + profile.anxiety / 18
@@ -4262,3 +4297,4 @@ extension Comparable {
         min(max(self, limits.lowerBound), limits.upperBound)
     }
 }
+
