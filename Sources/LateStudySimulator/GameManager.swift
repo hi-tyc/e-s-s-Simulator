@@ -53,6 +53,15 @@ final class GameManager: ObservableObject {
     /// 当前暴露分级的可读提示（P1 反馈层）。由 `updatePerception()` 每回合刷新。
     @Published var dangerSignalText: String = ExposureSignal.calm.detail
     @Published var dangerSignalLevel: ExposureSignal = .calm
+    /// 此刻能听见、但还没听清的响动。`倾听` 从这里取原材料。
+    @Published var audibleSignals: [AudibleSignal] = []
+    /// 上一次倾听的结果反馈（用错方向时给渐进提示）。
+    @Published var listenFeedback: String = ""
+    /// 连续听错方向的次数。用于渐进提示：错一次说"方向不对"，
+    /// 再错一次才把真实方位漏给玩家——既保留搜索感，又不会卡住人。
+    private var listenMissStreak = 0
+    /// 听觉信号的递增 id。用 &+ 自增，避免任何溢出路径。
+    private var audibleSignalSeed = 0
     @Published var classmates: [Classmate] = []
     @Published var eventLog: [EventLogEntry] = []
     @Published var audioCues: [AudioCue] = []
@@ -82,6 +91,10 @@ final class GameManager: ObservableObject {
     @Published var chapterClues: [ChapterClue] = []
     @Published var hasPresentedChapterOneDecision: Bool = false
     @Published var chapterOneDecision: String = ""
+    /// 章末决策是否建立在"真的听清了线索"之上。决定结局的写法。
+    @Published var chapterOneDecisionWasInformed: Bool = false
+    /// 撑不下去时的处境。非 nil 表示这一局以"崩溃"收尾。
+    @Published var chapterOneCollapse: ChapterOneCollapse?
     @Published var isChapterOneGuidePresented = false
     @Published var selectedChapterSeat: (row: Int, column: Int)?
     @Published var isChapterOnePaperPresented = false
@@ -348,8 +361,13 @@ final class GameManager: ObservableObject {
         chapterOneWaitRemaining = 0
         dangerSignalText = ExposureSignal.calm.detail
         dangerSignalLevel = .calm
+        audibleSignals = []
+        listenFeedback = ""
+        listenMissStreak = 0
         hasPresentedChapterOneDecision = false
         chapterOneDecision = ""
+        chapterOneDecisionWasInformed = false
+        chapterOneCollapse = nil
         lastAnomalyMonologueTurn = [:]
         hasTriggeredLoneliness = false
         hasTriggeredPhoneNotification = false
@@ -447,8 +465,13 @@ final class GameManager: ObservableObject {
         chapterOneWaitRemaining = 0
         dangerSignalText = ExposureSignal.calm.detail
         dangerSignalLevel = .calm
+        audibleSignals = []
+        listenFeedback = ""
+        listenMissStreak = 0
         hasPresentedChapterOneDecision = false
         chapterOneDecision = ""
+        chapterOneDecisionWasInformed = false
+        chapterOneCollapse = nil
         lastAnomalyMonologueTurn = [:]
         replay = []
         selectedReplayIndex = 0
@@ -1009,17 +1032,219 @@ final class GameManager: ObservableObject {
 
     var chapterOneAvailableActions: [PlayerAction] {
         guard chapterOneStep != .completed else { return [] }
-        var actions = PlayerAction.allCases.filter { $0 != .leaveSeat && $0 != .observe }
+        // 只藏起"举手离座"（它由剧情决定何时可用）。
+        // `观察` 曾经也被藏起来，但主线的第一步就是观察，按钮栏里却没有它——
+        // 玩家只能靠猜快捷键。既然要做"自己搜索"而不是"照着提示按按钮"，
+        // 两条信息通道（看 / 听）就必须都在明面上。
+        var actions = PlayerAction.allCases.filter { $0 != .leaveSeat }
         if chapterOneStep == .followLinChe {
             actions.append(.leaveSeat)
         }
         return actions
     }
 
-    /// 主线推进动作：不由常规按钮暴露，但必须能被 `execute` 接受。
+    /// 主线推进动作：必须能被 `execute` 接受。
     /// 与 `collectChapterClue` 的分支一一对应。
     var chapterOneMainQuestActions: Set<PlayerAction> {
-        [.observe, .breathe, .drink, .talk, .note]
+        [.observe, .listen, .breathe, .drink, .talk, .note]
+    }
+
+    /// 班长：固定角色 周予安。
+    ///
+    /// 第一版按"守序度最高"去挑，结果背景同学的性格每局重抽，
+    /// 随机冒出一个守序度更高的路人就成了"班长"——
+    /// 「班长的停顿」于是变成了「某个陌生人的停顿」，
+    /// 还会因为座位不同而出现在错误的方向上。属性可以重抽，身份不行。
+    var classMonitor: Classmate? {
+        classmates.first { $0.name == "周予安" }
+    }
+
+    /// 班干部当前和玩家的关系（读作"你跟他说得上话吗"）。
+    var monitorTrust: Double {
+        classMonitor?.relationship ?? 0
+    }
+
+    /// 把座位换算成"相对玩家在哪个方向"。
+    private func direction(towards seat: (row: Int, column: Int)) -> CameraPose {
+        let mine = selectedChapterSeat ?? GameManager.defaultPlayerSeat
+        if seat.row < mine.row { return .forward }      // 前排 = 教室前方
+        if seat.row > mine.row { return .rear }
+        if seat.column < mine.column { return .left }
+        if seat.column > mine.column { return .right }
+        return .desk
+    }
+
+    /// 教师位置换算成方向。用于"她叹了口气，但你没抬头"这类听觉线索。
+    private func direction(towardsTeacherAt index: Int) -> CameraPose {
+        switch index {
+        case 2, 3, 4: return .right      // 右过道 / 目标桌边
+        case 6: return .left             // 左过道
+        case 8: return .rear             // 后门
+        default: return .forward         // 讲台
+        }
+    }
+
+    // MARK: - 听觉信号与「倾听」
+    //
+    // ## 为什么音频必须承担信息
+    //
+    // 设计文档要求信息获取是 70% 音频。原来的实现里，线索推进靠
+    // `observe` + `cameraPose`，内容直接写进 `message`——音频只是氛围。
+    // 现在把"响动"做成**原材料**：世界先给你一声听不清的东西，
+    // 你要用 `倾听` 对准它，它才变成信息。这就是那 70% 的入口。
+    //
+    // ## 方向为什么不明说
+    //
+    // `ambiguousText` 不含方位结论，真实方位藏在 `sourcePose` 里。
+    // 玩家本来可以从音频声像听出方向；听不出来时，连续听错会触发
+    // 渐进提示，所以"找不到方向"最多是花掉一两个回合，而不是卡住人——
+    // 这是这个题材必须守住的底线。
+
+    /// 使当前回合的听觉信号与游戏状态同步。每回合开始调用一次。
+    ///
+    /// 信号随条件出现、随条件消失，并保留 1 个回合的余响
+    /// （否则玩家永远只能听到"刚刚那一下"，等于没有可探索的世界）。
+    private func refreshAudibleSignals() {
+        var signals = audibleSignals.filter { currentTurn - $0.turn <= 1 }
+
+        func register(
+            _ kind: AudioCueKind,
+            _ pose: CameraPose,
+            ambiguous: String,
+            resolved: String,
+            clue: ChapterClueID? = nil,
+            oneShot: Bool = true
+        ) {
+            guard signals.contains(where: { $0.kind == kind && $0.clue == clue }) == false else { return }
+            if let clue, collectedClueIDs.contains(clue) { return }
+            signals.append(AudibleSignal(
+                id: audibleSignalSeed &+ 1,
+                kind: kind,
+                sourcePose: pose,
+                ambiguousText: ambiguous,
+                resolvedText: resolved,
+                clue: clue,
+                turn: currentTurn,
+                isOneShot: oneShot
+            ))
+            audibleSignalSeed &+= 1
+        }
+
+        // 1. 藏住的鼻息：主线第二步的听觉线索。
+        //    只在"时机成熟"后出现：主线节奏必须优先于听觉世界，否则玩家
+        //    能靠反复倾听把主线提前催出来。
+        //    旁支线索（老师的叹气、班长的停顿）不受这道门槛限制——
+        //    等待回合恰恰是玩家该去做这些事的时候。
+        if chapterOneStep == .locateHiddenSound, chapterOneStepsUntilReady == 0 {
+            register(
+                .crying,
+                .right,
+                ambiguous: "有一声很轻的鼻息，像是有人把情绪往回压。它被翻书声切成了一小段一小段。",
+                resolved: "对准了。那不是椅子声——是一个人在很努力地不让自己出声。",
+                clue: .hiddenCrying
+            )
+        }
+
+        // 2. 方老师的叹气：老师也会累，但只有她真正疲惫时才听得见。
+        if teacher.fatigue > 62, currentPeriod.isBreak == false {
+            register(
+                .teacherSigh,
+                direction(towardsTeacherAt: teacher.positionIndex),
+                ambiguous: "教室前方传来一声很轻的、像把话咽回去的叹气。太安静了，你不敢确定是谁。",
+                resolved: "是方老师。她盯着全班看了几秒，才把视线从点名册上移开。她今晚也快撑不住了。",
+                clue: .teacherSigh
+            )
+        }
+
+        // 3. 班长的停顿：那个最守序的人，笔停下来的那一下。
+        if let monitor = classMonitor, monitor.stress > 58, teacher.kpiPressure > 52 {
+            register(
+                .paper,
+                direction(towards: monitor.seat),
+                ambiguous: "有人翻页翻到一半停住了。笔尖悬在纸上，很久没有落下。你听不出那在教室的哪一片。",
+                resolved: "是\(monitor.name)。她一直是最不会出错的那个，可她的笔停了很久，才想起来要假装继续写。",
+                clue: .monitorOverload
+            )
+        }
+
+        // 4. 纸条滑落：落地那一声是听得到的，作为"听"和"看"两条通道的交叉验证。
+        if chapterOneStep == .inspectNote {
+            register(
+                .paper,
+                .desk,
+                ambiguous: "桌子边缘有纸张滑动的细响，很近，就在你手边。",
+                resolved: "一张折过的纸停在你桌沿。它没有署名。",
+                clue: nil,
+                oneShot: false
+            )
+        }
+
+        audibleSignals = signals.sorted { $0.id < $1.id }
+    }
+
+    private var collectedClueIDs: Set<ChapterClueID> {
+        Set(chapterClues.map(\.id))
+    }
+
+    /// 听错方向时的提示。第一次只说"不对"，第二次才给方位。
+    private func listenHint(for pose: CameraPose) -> String {
+        if listenMissStreak >= 1 {
+            return "刚才那声音，其实更靠\(pose.rawValue)一点。"
+        }
+        return "方向不对。那边只有笔尖和吊扇的声音。"
+    }
+
+    /// 执行一次屏息倾听。
+    ///
+    /// 直接写 `message` 而不是返回字符串：`collectChapterClue` 会往 `message`
+    /// 追加内容，所以必须先落好正文再收线索，否则线索会追加到**上一回合**
+    /// 的旧文本后面，而本回合的反馈反而被丢掉。
+    private func performListen() {
+        spendAttention(for: cameraPose.visionZone, multiplier: 0.9)
+        // 停下来听，就是停止"写作业"这层保护色。代价刻意与 `观察` 同量级：
+        // 两条通道如果一条明显更便宜，玩家就只会用那条，
+        // "选择用哪条通道"这件事本身也就不成立了。
+        player.psychicEnergy = max(0, player.psychicEnergy - 4)
+        player.exposure += 5
+
+        let targeted = audibleSignals.first { signal in
+            guard signal.sourcePose == cameraPose else { return false }
+            guard let clue = signal.clue else { return true }
+            return collectedClueIDs.contains(clue) == false
+        }
+
+        guard let signal = targeted else {
+            if audibleSignals.isEmpty {
+                listenFeedback = "你屏住呼吸。只有笔尖、吊扇，和窗外很远的一声车。"
+                message = "你让自己安静下来，但没有听到新的东西。"
+                return
+            }
+            // 参考对象优先取"还没听清的那条线索"，而不是数组里的第一个：
+            // 玩家此刻想听的多半就是它，提示才对得上。
+            let reference = audibleSignals.first {
+                guard let clue = $0.clue else { return false }
+                return collectedClueIDs.contains(clue) == false
+            } ?? audibleSignals[0]
+            // 先取提示，再累加计数——否则第一次听错就会直接给出方位，
+            // "渐进"就白做了。
+            let hint = listenHint(for: reference.sourcePose)
+            listenMissStreak += 1
+            listenFeedback = hint
+            message = "你朝\(cameraPose.rawValue)屏息听了一会儿。\(hint)"
+            addAudioCue(.paper, direction: "教室四周", intensity: 0.24, note: "你放慢呼吸，但那个方向没有你要找的响动。")
+            return
+        }
+
+        listenMissStreak = 0
+        listenFeedback = signal.resolvedText
+        message = signal.resolvedText
+        addAudioCue(signal.kind, direction: signal.sourcePose.rawValue, intensity: 0.62, note: signal.resolvedText)
+
+        if let clue = signal.clue {
+            collectChapterClue(clue, messageSuffix: "（记下了一条线索：\(clue.title)）")
+            // 线索只听一次：听完这条响动就过去了。
+            audibleSignals.removeAll { $0.id == signal.id }
+        }
     }
 
     func restartWithCurrentSettings() {
@@ -1272,9 +1497,11 @@ final class GameManager: ObservableObject {
             rearLookRiskApplied = false
         }
 
+        // 只有**视觉**线索走"盯着看满 2.5 秒"这条路。
+        // `.locateHiddenSound` 被刻意移出：那道鼻息是听觉线索，
+        // 必须用 `倾听` 才拿得到，否则"70% 信息来自音频"就只是一句口号。
         let shouldObserve: Bool =
             (chapterOneStep == .observeLinChe && cameraPose == .left) ||
-            (chapterOneStep == .locateHiddenSound && cameraPose == .right) ||
             (chapterOneStep == .inspectNote && cameraPose == .desk)
         if shouldObserve {
             if chapterLookDwellPose == cameraPose { chapterLookDwell += delta }
@@ -1893,6 +2120,8 @@ final class GameManager: ObservableObject {
             player.stress += 1
             message = viewMode == .teacher ? teacherPerspective() : "你观察老师的移动节奏：鞋跟声、粉笔声、停顿，都变成了信息。"
             addMonologue("我一直在算风险，可是没人知道这也很累。", intensity: 0.52)
+        case .listen:
+            performListen()
         case .talk:
             spendAttention(for: .leftPeripheral, multiplier: 1)
             player.support += 14
@@ -2313,6 +2542,24 @@ final class GameManager: ObservableObject {
         clampPlayer()
     }
 
+    private var hasTeacherSigh: Bool { collectedClueIDs.contains(.teacherSigh) }
+    private var hasMonitorOverload: Bool { collectedClueIDs.contains(.monitorOverload) }
+    private var hasHiddenCrying: Bool { collectedClueIDs.contains(.hiddenCrying) }
+
+    /// 这个决策是否建立在"真的听清了线索"之上。
+    ///
+    /// 不是加分项，而是**结局写法**的开关：同一句"交给方老师"，
+    /// 听得见叹气的人和只看见纸条的人，交出去的东西并不一样。
+    private func decisionInformedness(_ choiceID: String) -> Bool {
+        switch choiceID {
+        case "chapter1_teacher": return hasTeacherSigh
+        case "chapter1_monitor": return hasMonitorOverload
+        case "chapter1_tomorrow": return hasHiddenCrying
+        case "chapter1_wait": return chapterClues.count >= 4
+        default: return false
+        }
+    }
+
     @discardableResult
     private func presentChapterOneDecisionIfNeeded() -> Bool {
         guard activeChapter == .silentClassroom,
@@ -2327,11 +2574,38 @@ final class GameManager: ObservableObject {
             kind: .classmateHelpRequest(classmateID: highestRiskClassmate?.id ?? 0),
             title: "关卡一结束：不署名纸条",
             body: "下课前，纸条压在你的草稿纸下面。你已经记录了 \(chapterClues.count) 条线索，但仍然不知道全部真相。现在要决定：这件事由谁一起承担。",
+            // 选项的"说法"取决于你这 12 个回合究竟听清了多少。
+            // 这是让前面的选择真正结账的地方：同样四个按钮，
+            // 做过功课的人按下去时手里握着的东西不一样。
             choices: [
-                EventChoice(id: "chapter1_teacher", title: "交给方老师", detail: "最快进入成人支持路径，也可能让当事人感到被曝光"),
-                EventChoice(id: "chapter1_monitor", title: "找可靠班干部共同判断", detail: "形成同伴协作链，但会把责任分给另一个学生"),
-                EventChoice(id: "chapter1_tomorrow", title: "明天再确认", detail: "尊重边界，但可能错过今晚的信息窗口"),
-                EventChoice(id: "chapter1_wait", title: "下课后在走廊等一等", detail: "保留当事人的主动性，也承担独自等待的不确定")
+                EventChoice(
+                    id: "chapter1_teacher",
+                    title: "交给方老师",
+                    detail: hasTeacherSigh
+                        ? "你已经听出她也快撑不住了——可以告诉她先看林澈，别急着处理纪律"
+                        : "最快进入成人支持路径，也可能让当事人感到被曝光"
+                ),
+                EventChoice(
+                    id: "chapter1_monitor",
+                    title: "找可靠班干部共同判断",
+                    detail: hasMonitorOverload
+                        ? "你知道班长自己的笔也停了很久——可以先把话说开，再决定怎么分"
+                        : "形成同伴协作链，但会把责任分给另一个学生"
+                ),
+                EventChoice(
+                    id: "chapter1_tomorrow",
+                    title: "明天再确认",
+                    detail: hasHiddenCrying
+                        ? "你确定那不是错觉，所以“明天”需要写下来才算数"
+                        : "尊重边界，但可能错过今晚的信息窗口"
+                ),
+                EventChoice(
+                    id: "chapter1_wait",
+                    title: "下课后在走廊等一等",
+                    detail: chapterClues.count >= 4
+                        ? "你手上的线索足够具体，等待比追问更可能被接住"
+                        : "保留当事人的主动性，也承担独自等待的不确定"
+                )
             ]
         )
         return true
@@ -2500,7 +2774,12 @@ final class GameManager: ObservableObject {
         if player.support > 55 {
             // 支持网络是"被动接住"，每次能量见底都可以触发，
             // 但有递减：每触发一次，所需支持度更高。
-            guard exhaustionEventsThisRun < 3 else { return }
+            // 用尽之后必须结算——原来这里是 `return`，
+            // 玩家会停在能量 0 的状态里无限点下去，既不结束也不恢复。
+            guard exhaustionEventsThisRun < 3 else {
+                collapseOrFinish()
+                return
+            }
             guard player.support > 55 + Double(exhaustionEventsThisRun) * 8 else {
                 triggerExhaustionEvent()
                 return
@@ -2525,6 +2804,24 @@ final class GameManager: ObservableObject {
         }
     }
 
+    /// 收尾：如果能判断出这一晚的处境，就按处境写结局，而不是写一句通用评语。
+    private func collapseOrFinish() {
+        if activeChapter == .silentClassroom {
+            chapterOneCollapse = currentCollapseKind
+        }
+        finish()
+    }
+
+    /// 此刻垮掉的话，会以什么方式被看见。
+    ///
+    /// 顺序即优先级：先看有没有人真的接着你，再看有没有人注意到，
+    /// 最后才是"谁都不知道"。这条顺序本身就是这个游戏想说的话。
+    private var currentCollapseKind: ChapterOneCollapse {
+        if player.support >= 60 { return .heldByPeer }
+        if teacher.empathy >= 52 { return .seenByTeacher }
+        return .alone
+    }
+
     /// 能量见底时的出口。
     ///
     /// 设计意图：不让"能量归零"变成无反馈的卡死状态。每次见底都会给出
@@ -2536,7 +2833,8 @@ final class GameManager: ObservableObject {
         let recoveryTable: [Double] = [14, 9, 5]
         guard exhaustionEventsThisRun < recoveryTable.count else {
             // 连续三次见底仍无法恢复，说明这一晚已经走到尽头。
-            finish()
+            // 但"以什么方式走到尽头"是有区别的。
+            collapseOrFinish()
             return
         }
         let recovery = recoveryTable[exhaustionEventsThisRun]
@@ -2580,7 +2878,10 @@ final class GameManager: ObservableObject {
     /// 计算当前状态对应的结局。
     /// 声明为 internal（而非 private）以便单元测试直接验证各结局分支。
     func calculateEnding() -> Ending {
-        if activeChapter == .silentClassroom, hasPresentedChapterOneDecision {
+        // 撑不住的结局同样属于第一章，也必须走章节专属的写法：
+        // 通用分支会把三种完全不同的处境压成同一句"崩溃边缘"。
+        if activeChapter == .silentClassroom,
+           hasPresentedChapterOneDecision || chapterOneCollapse != nil {
             return chapterOneEnding()
         }
 
@@ -2661,12 +2962,20 @@ final class GameManager: ObservableObject {
     }
 
     private func chapterOneEnding() -> Ending {
+        // 撑不住的那一晚优先：它不是失败分支，而是第一章最重的一种收尾。
+        if let collapse = chapterOneCollapse {
+            return chapterOneCollapseEnding(collapse)
+        }
+
         let clueTitles = chapterClues.map(\.title).joined(separator: "、")
         let decision = chapterOneDecision.isEmpty ? "暂未决定" : chapterOneDecision
 
         // 按章末决策分化结局。四个选项代表四种对待"不确定"的方式，
         // 各自的代价与收获不同，因此给出不同的标题、正文与反思。
-        let profile = chapterOneDecisionProfile(decision: decision)
+        let profile = chapterOneDecisionProfile(
+            decision: decision,
+            informed: chapterOneDecisionWasInformed
+        )
 
         return Ending(
             title: profile.title,
@@ -2695,6 +3004,69 @@ final class GameManager: ObservableObject {
         )
     }
 
+    /// 三种"撑不住"的结尾。
+    ///
+    /// 都不是失败页面：这一晚真正发生的事，是有人接住了你、有人看见了你、
+    /// 或者这件事从头到尾只有你自己知道。三种处境要给出三种不同的下一步，
+    /// 否则“崩溃不是失败”就只是一句安慰。
+    private func chapterOneCollapseEnding(_ collapse: ChapterOneCollapse) -> Ending {
+        let clueTitles = chapterClues.map(\.title).joined(separator: "、")
+        let clues = clueTitles.isEmpty ? "还没记下任何线索" : clueTitles
+
+        let body: String
+        let reflection: String
+        let story: EndingStory
+        let actionTitle: String
+
+        switch collapse {
+        case .heldByPeer:
+            actionTitle = "有人在你开口之前就动了"
+            body = "你没有撑完这一晚。但同桌先注意到你的手在抖，把练习册往你这边推了一下，替你挡住了那一小段视线。今晚的线索停在 \(clues)。"
+            reflection = "支持网络不是一句鼓励，而是“有人在具体的一秒里做了什么”。它降低的不是压力本身，而是你独自承受的那部分。"
+            story = EndingStory(
+                title: "复盘：被接住之后",
+                body: "被接住的那一刻往往很普通——一张纸、一次掩护、一句“你还好吗”。它的意义不在于解决了问题，而在于让崩溃不再只发生在一个人身上。接下来要做的是把这份支持说清楚：谢谢，以及我现在需要什么。",
+                prompt: "回想刚才被接住的那一秒：对方具体做了什么？你愿意让谁知道你需要这个？"
+            )
+        case .seenByTeacher:
+            actionTitle = "她先看见了，而不是你先开口"
+            body = "你没有撑完这一晚。方老师在你还没举手之前就走了过来，把声音压得很低，没有点名，也没有提纪律。今晚的线索停在 \(clues)。"
+            reflection = "老师看见的通常不是“崩溃”，而是一连串很小的动作：笔停了、背塌了、抬头次数变多。她先看见，说明那些信号其实一直存在。"
+            story = EndingStory(
+                title: "复盘：成人支持的入口",
+                body: "被老师看见不等于被公开。真正有用的成人支持往往从一句低音的询问开始，而不是从全班的注视开始。你可以决定说多少，也可以只说“我现在不行”。",
+                prompt: "如果老师问“你还好吗”，你打算怎么回答？有没有一句话既能保护自己，又能让对方知道该做什么？"
+            )
+        case .alone:
+            actionTitle = "整晚没有人发现"
+            body = "你没有撑完这一晚，而且没有被任何人发现。教室很安静，所有人都在完成自己的那一份。今晚的线索停在 \(clues)。"
+            reflection = "最安静、最会完成任务的学生，往往也是最容易被漏掉的那一个。没有被发现不代表你不重要，只代表这间教室缺一个能看见的信号。"
+            story = EndingStory(
+                title: "复盘：看不见的代价",
+                body: "把自己撑到尽头，是一种很孤独的熟练。这一晚没有坏人，只有一整套让所有人都低着头的安排。改变它不需要谁变得伟大，只需要有一个人多问一句。",
+                prompt: "如果重来一次，你会在哪一步允许别人知道？最先能说出口的那句话是什么？"
+            )
+        }
+
+        var analysis = endingMetrics()
+        analysis.insert(
+            EndingMetric(title: "收尾方式", value: actionTitle, note: "撑不住时，这一晚是被谁看见的"),
+            at: 0
+        )
+
+        return Ending(
+            title: collapse.title,
+            body: body,
+            reflection: reflection,
+            story: story,
+            empathyReflections: empathyReflections(kind: .breakdown),
+            relationshipEchoes: relationshipEchoes(),
+            analysis: analysis,
+            comparisons: endingComparisons(),
+            resources: supportResources()
+        )
+    }
+
     /// 章末决策对应的结局文案。四个选项代表四种面对不确定性的方式。
     private struct ChapterOneEndingProfile {
         let title: String
@@ -2704,8 +3076,34 @@ final class GameManager: ObservableObject {
         let storyBody: String
         let storyPrompt: String
         let body: (Int, String) -> String
+        /// 听清线索后的变体。nil 表示这一条没有额外写法。
+        var informedTitle: String? = nil
+        var informedNote: String? = nil
+        var informedReflection: String? = nil
+        var informedStory: String? = nil
 
-        static func make(decision: String) -> ChapterOneEndingProfile {
+        /// 同一句决策，听清了线索的人和没听清的人，交出去的东西不一样。
+        /// `informed` 不是加分，而是**换一种写法**：
+        /// 你知道得更多，所以你能说得更具体，下一步也更容易被接住。
+        static func make(decision: String, informed: Bool) -> ChapterOneEndingProfile {
+            let base = makeBase(decision: decision)
+            guard informed else { return base }
+            return base.informedVariant()
+        }
+
+        private func informedVariant() -> ChapterOneEndingProfile {
+            ChapterOneEndingProfile(
+                title: informedTitle ?? title,
+                actionNote: informedNote ?? actionNote,
+                reflection: reflection + (informedReflection.map { " " + $0 } ?? ""),
+                storyTitle: storyTitle,
+                storyBody: storyBody + (informedStory.map { " " + $0 } ?? ""),
+                storyPrompt: storyPrompt,
+                body: body
+            )
+        }
+
+        private static func makeBase(decision: String) -> ChapterOneEndingProfile {
             switch decision {
             case "交给方老师":
                 return ChapterOneEndingProfile(
@@ -2717,7 +3115,11 @@ final class GameManager: ObservableObject {
                     storyPrompt: "如果你担心交出去会让对方被曝光，有没有一种方式，既保护当事人，也让成人知道该往哪里看？",
                     body: { count, clues in
                         "你没有看见全部真相，但已经发现了 \(count) 条值得被认真对待的信号：\(clues.isEmpty ? "暂无明确线索" : clues)。你把它们交了出去。"
-                    }
+                    },
+                    informedTitle: "关卡一完成：她知道该往哪看",
+                    informedNote: "交出去的时候，顺手把“该看哪里”也说清楚",
+                    informedReflection: "你交出去的是一句她已经有力气做的事。具体的信息让成人支持更容易开始，也更不容易变成一次公开处理。",
+                    informedStory: "同一句“交给老师”，说得具体和不具体，结果差很远。你没有替她判断，只是把听见的按顺序讲了一遍——她今晚很累，但这一件她还接得住。"
                 )
             case "找可靠班干部共同判断":
                 return ChapterOneEndingProfile(
@@ -2729,7 +3131,11 @@ final class GameManager: ObservableObject {
                     storyPrompt: "当支持链里另一个人也开始疲惫时，你们打算怎么轮流承担？",
                     body: { count, clues in
                         "你记录了 \(count) 条线索：\(clues.isEmpty ? "暂无明确线索" : clues)。这一次不是你一个人在看。"
-                    }
+                    },
+                    informedTitle: "关卡一完成：先把担子说清楚",
+                    informedNote: "分工之前，先确认对方还扛不扛得住",
+                    informedReflection: "你知道那个最靠得住的人，自己的笔也停了很久。协作的前提不是把事分出去，而是先问一句“你现在行不行”。",
+                    informedStory: "你没有直接把纸条推给他，而是先说了一句：我看你今晚也很紧。支持链的第一个动作不是分工，是承认每个人都在承受。"
                 )
             case "明天再确认":
                 return ChapterOneEndingProfile(
@@ -2741,7 +3147,11 @@ final class GameManager: ObservableObject {
                     storyPrompt: "如果把这件事留到明天，你需要什么条件，才能让它不被日常淹没？",
                     body: { count, clues in
                         "线索停在 \(count) 条：\(clues.isEmpty ? "暂无明确线索" : clues)。你把判断留给了明天。"
-                    }
+                    },
+                    informedTitle: "关卡一完成：带着证据回家",
+                    informedNote: "不确定也有重量，所以写下来再放下",
+                    informedReflection: "你确定那不是错觉——你听见了。所以“明天”就不再是搁置，而是一次有准备的回访。",
+                    informedStory: "你把听见的那一声、看见的那一页写在了纸条背面，折好收进笔袋。留到明天不等于丢掉，前提是明天你真的会打开它。"
                 )
             case "下课后在走廊等一等":
                 return ChapterOneEndingProfile(
@@ -2753,7 +3163,11 @@ final class GameManager: ObservableObject {
                     storyPrompt: "如果他没有出来，你打算怎么面对这份落空？",
                     body: { count, clues in
                         "你带着 \(count) 条线索走到走廊：\(clues.isEmpty ? "暂无明确线索" : clues)。你决定不追问，只留下一个位置。"
-                    }
+                    },
+                    informedTitle: "关卡一完成：等一个还会出来的人",
+                    informedNote: "手里的线索足够具体，所以等待不等于空等",
+                    informedReflection: "你手上不是一句模糊的“他不太对”，而是几个具体的时刻。具体的观察让陪伴有了分寸，也让退出有了依据。",
+                    informedStory: "走廊的灯比教室暗。你没有准备台词，只是在心里过了一遍今晚听见的东西——如果他不出来，你也知道该去找谁。"
                 )
             default:
                 return ChapterOneEndingProfile(
@@ -2771,8 +3185,8 @@ final class GameManager: ObservableObject {
         }
     }
 
-    private func chapterOneDecisionProfile(decision: String) -> ChapterOneEndingProfile {
-        ChapterOneEndingProfile.make(decision: decision)
+    private func chapterOneDecisionProfile(decision: String, informed: Bool) -> ChapterOneEndingProfile {
+        ChapterOneEndingProfile.make(decision: decision, informed: informed)
     }
 
     private func teacherEnding() -> Ending {
@@ -3026,6 +3440,8 @@ final class GameManager: ObservableObject {
         let signal = exposureSignal
         dangerSignalLevel = signal
         dangerSignalText = signal.detail
+        // 回合边界刷新听觉世界：世界先发出响动，玩家再决定要不要去听。
+        refreshAudibleSignals()
         audio.updateStress(energy: player.psychicEnergy, stress: player.stress, teacherNear: teacher.isNearPlayer, support: player.support, classroomNoise: classroomNoise)
         audio.updateAmbient(classroomNoise: classroomNoise, period: currentPeriod, lightLevel: classroomLightLevel, elapsedMinutes: elapsedMinutes)
     }
@@ -3877,6 +4293,7 @@ final class GameManager: ObservableObject {
             message = "你回看过去。对方移开视线，但这段关系更难回到普通。"
         case "chapter1_teacher":
             chapterOneDecision = "交给方老师"
+            chapterOneDecisionWasInformed = decisionInformedness("chapter1_teacher")
             teacher.studentsHelped += 1
             teacher.empathy += 2
             player.support += 8
@@ -3887,6 +4304,7 @@ final class GameManager: ObservableObject {
             shouldFinishAfterChoice = true
         case "chapter1_monitor":
             chapterOneDecision = "找可靠班干部共同判断"
+            chapterOneDecisionWasInformed = decisionInformedness("chapter1_monitor")
             player.support += 12
             player.psychicEnergy -= 4
             player.maskCost += 3
@@ -3896,6 +4314,7 @@ final class GameManager: ObservableObject {
             shouldFinishAfterChoice = true
         case "chapter1_tomorrow":
             chapterOneDecision = "明天再确认"
+            chapterOneDecisionWasInformed = decisionInformedness("chapter1_tomorrow")
             player.exposure = max(0, player.exposure - 8)
             player.stress += 6
             player.maskCost += 6
@@ -3905,6 +4324,7 @@ final class GameManager: ObservableObject {
             shouldFinishAfterChoice = true
         case "chapter1_wait":
             chapterOneDecision = "下课后在走廊等一等"
+            chapterOneDecisionWasInformed = decisionInformedness("chapter1_wait")
             player.support += 5
             player.stress += 4
             player.exposure += 4
@@ -4010,9 +4430,14 @@ final class GameManager: ObservableObject {
         case .observeLinChe where action == .observe && cameraPose == .left:
             collectChapterClue(.linChePage, messageSuffix: "林澈的书停在同一页太久了，笔尖也没有动。")
             advanceChapterOne(to: .locateHiddenSound, cue: "右侧传来一声很轻的鼻息，又被翻书声盖住。")
-        case .locateHiddenSound where action == .observe && cameraPose == .right:
-            collectChapterClue(.hiddenCrying, messageSuffix: "那不是椅子声。有人在努力把情绪压回去。")
-            advanceChapterOne(to: .regulateSelf, cue: "方老师的脚步靠近，视线开始有一点散。")
+        case .locateHiddenSound where action == .listen && collectedClueIDs.contains(.hiddenCrying):
+            // 必须**真的听清了**那条线索才能推进。第一版这里没有这条判断，
+            // 结果随便朝哪个方向倾听都会白白拿到 hiddenCrying ——
+            // "自己搜索"又变回了"按一下就给"。
+            advanceChapterOne(
+                to: .regulateSelf,
+                cue: "那不是椅子声——有人在很努力地不让自己出声。方老师的脚步靠近，视线开始有一点散。"
+            )
             addBackgroundSignalReaction()
         case .regulateSelf where action == .breathe || action == .drink:
             addMonologue("我也在这间教室里。先让自己缓一下，才听得清别人。", intensity: 0.64)

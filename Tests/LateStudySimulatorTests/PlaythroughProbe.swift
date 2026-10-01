@@ -200,7 +200,7 @@ struct PlaythroughProbe {
             return .observe
         case .locateHiddenSound:
             game.setPose(.right)
-            return .observe
+            return .listen
         case .regulateSelf:
             return .breathe
         case .approachLinChe:

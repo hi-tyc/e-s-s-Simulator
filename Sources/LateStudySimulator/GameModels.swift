@@ -19,6 +19,30 @@ enum StoryChapter: String {
     }
 }
 
+/// 撑不下去时的三种"崩溃方式"。
+///
+/// 设计意图：游戏自己说"崩溃不是失败，是信号"，那**崩溃的方式**就不该只有一个。
+/// 原来的实现是三条出口用尽后直接 `finish()`，落到通用的"崩溃边缘"——
+/// 等于把最该被看见的一晚，收成了一句通用评语。
+/// 现在撑不住会按当时的处境改写成三种不同的结尾：
+/// 有人接住 / 被老师看见 / 谁都不知道。
+enum ChapterOneCollapse: String, CaseIterable {
+    /// 支持网络在你垮掉之前接住了你。
+    case heldByPeer
+    /// 老师先注意到了，而不是你先开口。
+    case seenByTeacher
+    /// 没有人发现。你自己撑到了尽头。
+    case alone
+
+    var title: String {
+        switch self {
+        case .heldByPeer: return "关卡一结束：被接住的那一次"
+        case .seenByTeacher: return "关卡一结束：她先看见了"
+        case .alone: return "关卡一结束：没人知道的那一晚"
+        }
+    }
+}
+
 enum ChapterOneStep: Int, CaseIterable, Equatable {
     case observeLinChe
     case locateHiddenSound
@@ -28,27 +52,43 @@ enum ChapterOneStep: Int, CaseIterable, Equatable {
     case followLinChe
     case completed
 
+    /// 玩家看到的目标。
+    ///
+    /// 刻意**只写意图，不写方位、不写该按哪个键**（交接文档：主线最优路径
+    /// 必须是玩家自己走出来的）。方位信息由音频声像和视觉余光提供，
+    /// 那才是这个游戏的信息通道。
     var objective: String {
         switch self {
-        case .observeLinChe: return "看看林澈今晚在做什么"
-        case .locateHiddenSound: return "听清右侧那道声音"
-        case .regulateSelf: return "先让自己缓一下"
-        case .approachLinChe: return "下课前，问林澈一句"
-        case .inspectNote: return "捡起掉到桌边的纸条"
-        case .followLinChe: return "别让林澈一个人离开"
+        case .observeLinChe: return "确认林澈今晚是不是真的“正常”"
+        case .locateHiddenSound: return "听清那道被翻书声盖住的声音"
+        case .regulateSelf: return "先把自己放稳"
+        case .approachLinChe: return "在铃响前接近他"
+        case .inspectNote: return "确认桌边滑下去的那张纸"
+        case .followLinChe: return "别让他一个人走"
         case .completed: return "第一章完成"
         }
     }
 
+    /// 给玩家的下一步提示。
+    ///
+    /// 只说明**要用哪条通道**（看 / 听 / 说话），不说明**朝哪个方向**。
+    /// 找方向是玩家的事——这是把"照着提示按按钮"换回"自己搜索"的关键。
     var guidance: String {
         switch self {
-        case .observeLinChe: return "看向左侧，确认那阵停下来的翻书声。"
-        case .locateHiddenSound: return "转向右侧，别让翻书声盖住那一下鼻息。"
-        case .regulateSelf: return "不用读数值。喝口水，或者先把呼吸放慢。"
-        case .approachLinChe: return "铃响前，用一句低压力的话靠近他。"
-        case .inspectNote: return "低头看桌面，确认刚才滑落的纸片。"
-        case .followLinChe: return "林澈已经走向门口。现在起身跟上。"
-        case .completed: return "你带着匿名纸条走进了走廊。"
+        case .observeLinChe:
+            return "他看起来一直很稳。稳，不等于没事——先看清楚他今晚在做什么。"
+        case .locateHiddenSound:
+            return "有一声很轻的鼻息，被翻书声盖住了。想听清，得先安静下来，再对准它。"
+        case .regulateSelf:
+            return "在找到他之前，别先把自己耗尽。"
+        case .approachLinChe:
+            return "用一句不制造压力的话靠近他。说错话，比不说话更糟。"
+        case .inspectNote:
+            return "有什么东西从桌沿滑下去了。先确认它，别惊动别处。"
+        case .followLinChe:
+            return "他已经在收东西了。现在，起身。"
+        case .completed:
+            return "你带着匿名纸条走进了走廊。"
         }
     }
 }
@@ -344,6 +384,12 @@ enum PlayerAction: String, CaseIterable, Identifiable {
     case phone = "看手机"
     case note = "传纸条"
     case observe = "观察"
+    /// 屏息倾听。
+    ///
+    /// 与 `observe` 是**两条不同的信息通道**：观察拿视觉信息（书页停在同一页、
+    /// 纸条滑落），倾听拿听觉信息（笔尖停住、压住的鼻息、老师的叹气）。
+    /// 设计文档要求"70% 音频 + 20% 视觉余光 + 10% UI"，这个动作就是那 70% 的入口。
+    case listen = "倾听"
     case talk = "同桌"
     case breathe = "深呼吸"
     case window = "看窗外"
@@ -359,6 +405,7 @@ enum PlayerAction: String, CaseIterable, Identifiable {
         case .phone: return "iphone"
         case .note: return "envelope.fill"
         case .observe: return "eye.fill"
+        case .listen: return "ear.fill"
         case .talk: return "person.2.fill"
         case .breathe: return "wind"
         case .window: return "moon.stars.fill"
@@ -374,6 +421,7 @@ enum PlayerAction: String, CaseIterable, Identifiable {
         case .phone: return "2"
         case .note: return "3"
         case .observe: return "4"
+        case .listen: return "t"
         case .talk: return "5"
         case .breathe: return "6"
         case .window: return "7"
@@ -381,6 +429,14 @@ enum PlayerAction: String, CaseIterable, Identifiable {
         case .snack: return "9"
         case .leaveSeat: return "0"
         }
+    }
+
+    /// 这条动作是否"必须朝向声源/目标"才有效。
+    ///
+    /// 用于 UI 提示：`observe` / `listen` 的效果取决于当前视角，
+    /// 所以按钮上要标注它读的是哪个方向。
+    var isDirectional: Bool {
+        self == .observe || self == .listen
     }
 }
 
@@ -542,6 +598,39 @@ enum ExposureSignal: Int, CaseIterable, Comparable {
         case .targeted:
             return "你感觉被盯住了，后背发紧。下一步她就会走过来。"
         }
+    }
+}
+
+/// 一声"听得见、但还没听清"的响动。
+///
+/// 设计意图（设计文档：70% 音频 + 20% 视觉余光 + 10% UI）：
+/// 玩家能收到的不是结论，而是**线索的原材料**——一个方向、一种节奏、
+/// 一句含糊的描述。要把它变成信息，必须用 `倾听` 对准声源。
+///
+/// `sourcePose` 是声源的真实方向，刻意**不直接展示给玩家**：
+/// 玩家看到的是 `ambiguousText`（不含方向的模糊描述），
+/// 对准了才拿到 `resolvedText`。听到方向靠的是音频声像，
+/// 听不出来时用错一次会得到渐进式提示（见 `listenHint`），
+/// 保证"猜错有代价，但不会卡死"。
+struct AudibleSignal: Identifiable, Equatable {
+    let id: Int
+    let kind: AudioCueKind
+    /// 声源真实方向。判定"有没有对准"用。
+    let sourcePose: CameraPose
+    /// 没对准时玩家读到的描述：有内容，但没有方位结论。
+    let ambiguousText: String
+    /// 对准之后读到的东西。
+    let resolvedText: String
+    /// 听清后能拿到的线索。
+    let clue: ChapterClueID?
+    /// 这个信号是第几回合出现的，用于超时淡出。
+    let turn: Int
+    /// 听清之后是否允许重复收听（普通环境音可以，线索只给一次）。
+    let isOneShot: Bool
+
+    /// 未对准时的描述 + 一句"你还分不清方向"的诚实提示。
+    var unresolvedHint: String {
+        "\(ambiguousText) 你还分不清它在哪一侧。"
     }
 }
 

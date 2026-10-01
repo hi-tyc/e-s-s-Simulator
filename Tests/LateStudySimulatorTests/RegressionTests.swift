@@ -225,7 +225,7 @@ struct RegressionTests {
 
         matureChapterOneStep(game)
         game.setPose(.right)
-        game.execute(.observe)
+        game.execute(.listen)
         #expect(game.chapterOneStep == .regulateSelf)
 
         matureChapterOneStep(game)
@@ -262,7 +262,7 @@ struct RegressionTests {
 
         // 时机未到时，用正确的动作催线索也不会前进（但回合照常流逝）。
         game.setPose(.right)
-        game.execute(.observe)
+        game.execute(.listen)
         #expect(game.chapterOneStep == .locateHiddenSound)
         #expect(game.currentTurn > turnAfterClue)
 
@@ -272,7 +272,7 @@ struct RegressionTests {
         // 等信号自己成熟之后，同一个动作就能推进。
         matureChapterOneStep(game)
         game.setPose(.right)
-        game.execute(.observe)
+        game.execute(.listen)
         #expect(game.chapterOneStep == .regulateSelf)
     }
 
@@ -318,13 +318,13 @@ struct RegressionTests {
         var actions = 0
         while game.chapterOneStepsUntilReady > 0 && actions < 10 {
             game.setPose(.right)
-            game.execute(.observe)
+            game.execute(.listen)
             actions += 1
         }
         #expect(game.chapterOneStepsUntilReady == 0, "等待回合必须能被行动消耗掉")
 
         game.setPose(.right)
-        game.execute(.observe)
+        game.execute(.listen)
         #expect(game.chapterOneStep == .regulateSelf, "回合数到顶后主线仍然必须能推进")
     }
 
@@ -358,6 +358,260 @@ struct RegressionTests {
         // 视角必须仍然可用：这正是主线推进所依赖的东西。
         game.setPose(.desk)
         #expect(game.cameraPose == .desk)
+    }
+
+    // MARK: - 听觉通道（信息 70% 来自音频）
+
+    /// 任务提示只能说明"用哪条通道"，不能说明"朝哪个方向 / 按哪个键"。
+    ///
+    /// 这是把"照着提示按按钮"换回"自己搜索"的守卫。方位信息属于音频声像，
+    /// 一旦写进提示，搜索这一步就没了，主线又退化成流程播放。
+    @Test func chapterOneGuidanceDoesNotHandOutTheAnswer() {
+        let directionWords = ["左侧", "右侧", "前方", "后方", "低头", "抬头", "看向", "转向", "按 "]
+        for step in ChapterOneStep.allCases where step != .completed {
+            for word in directionWords {
+                #expect(step.guidance.contains(word) == false,
+                        "\(step) 的提示泄露了方位或按键：\(step.guidance)")
+                #expect(step.objective.contains(word) == false,
+                        "\(step) 的目标泄露了方位或按键：\(step.objective)")
+            }
+        }
+    }
+
+    /// 那道鼻息是**听觉**线索：观察拿不到，只有对准声源倾听才行。
+    @Test func hiddenCryingIsAudioOnly() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        game.setPose(.left)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .locateHiddenSound)
+        matureChapterOneStep(game)
+
+        // 用"看"：方向对也没用，这一步不属于视觉通道。
+        game.setPose(.right)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .locateHiddenSound)
+        #expect(collectedClueIDs(game).contains(.hiddenCrying) == false)
+
+        // 用"听"，并且对准声源。
+        game.setPose(.right)
+        game.execute(.listen)
+        #expect(game.chapterOneStep == .regulateSelf)
+        #expect(collectedClueIDs(game).contains(.hiddenCrying))
+    }
+
+    /// 听错方向要付出代价，但不能让人卡住：第二次听错会漏出真实方位。
+    @Test func listeningInTheWrongDirectionCostsATurnAndGivesAHint() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        game.setPose(.left)
+        game.execute(.observe)
+        matureChapterOneStep(game)
+
+        let exposureBefore = game.player.exposure
+        game.setPose(.left)          // 声源在右侧
+        game.execute(.listen)
+        #expect(game.chapterOneStep == .locateHiddenSound, "听错方向不应推进主线")
+        #expect(game.listenFeedback.isEmpty == false, "听错方向必须给反馈")
+        #expect(game.listenFeedback.contains("右") == false, "第一次听错不该直接给出方位")
+        #expect(game.player.exposure > exposureBefore, "停下来听本身也有暴露代价")
+
+        game.setPose(.left)
+        game.execute(.listen)
+        #expect(game.listenFeedback.contains("右"), "连续听错两次后必须给出方位，避免卡死")
+    }
+
+    /// 「班长的停顿」必须属于**班长本人**，不能是随机属性最高的路人。
+    @Test func classMonitorIsTheAuthoredClassMonitor() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        // 背景同学的性格每局重抽，可能抽出守序度更高的路人；
+        // 班长是作者写定的身份，不能按属性挑。
+        for _ in 0..<8 {
+            let (candidate, _) = makeIsolatedGame()
+            candidate.startGame()
+            #expect(candidate.classMonitor?.name == "周予安")
+        }
+        #expect(game.classMonitor?.name == "周予安")
+    }
+
+    /// 两个"写好了却永远收不到"的线索必须真的能收到。
+    @Test func authoredSideCluesAreAudibleAndCollectable() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        // 把两条旁支线索的触发条件摆好。
+        let monitorIndex = game.classmates.firstIndex { $0.name == "周予安" }
+        #expect(monitorIndex != nil)
+        game.classmates[monitorIndex!].stress = 90
+        game.teacher.kpiPressure = 70
+        game.teacher.fatigue = 80
+
+        game.execute(.study)
+        let audible = Set(game.audibleSignals.compactMap(\.clue))
+        #expect(audible.contains(.monitorOverload), "班长的停顿应当出现在听觉世界里")
+        #expect(audible.contains(.teacherSigh), "方老师的叹气应当出现在听觉世界里")
+
+        // 逐条听清。老师的方位随巡视变化，所以每轮都重新取一次方向。
+        var safety = 0
+        while collectedClueIDs(game).contains(.monitorOverload) == false
+                || collectedClueIDs(game).contains(.teacherSigh) == false {
+            safety += 1
+            guard safety < 20 else { break }
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+                continue
+            }
+            guard let signal = game.audibleSignals.first(where: {
+                guard let clue = $0.clue else { return false }
+                return collectedClueIDs(game).contains(clue) == false
+            }) else {
+                game.execute(.study)     // 让听觉世界刷新
+                continue
+            }
+            game.setPose(signal.sourcePose)
+            game.execute(.listen)
+        }
+
+        let collected = collectedClueIDs(game)
+        #expect(collected.contains(.monitorOverload), "班长的停顿必须能被收下")
+        #expect(collected.contains(.teacherSigh), "方老师的叹气必须能被收下")
+    }
+
+    private func collectedClueIDs(_ game: GameManager) -> Set<ChapterClueID> {
+        Set(game.chapterClues.map(\.id))
+    }
+
+    // MARK: - 崩溃是分支，不是终止
+
+    /// 把玩家推到"撑不下去"。每轮重新压满压力，模拟一直没缓过来。
+    private func driveToCollapse(_ game: GameManager) {
+        game.player.stress = 99
+        var safety = 0
+        while safety < 24 {
+            if case .ending = game.gameState { return }
+            game.player.stress = 99
+            game.continueAfterEvent()
+            safety += 1
+        }
+    }
+
+    private func makeGameAtCollapse(support: Double, empathy: Double) -> GameManager {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+        game.player.support = support
+        game.teacher.empathy = empathy
+        driveToCollapse(game)
+        return game
+    }
+
+    /// 撑不住时，结尾要写清"这一晚是被谁看见的"，而不是统一一句"崩溃边缘"。
+    @Test func collapseIsRewrittenByWhatWasHappeningAroundYou() {
+        let held = makeGameAtCollapse(support: 82, empathy: 40)
+        #expect(held.chapterOneCollapse == .heldByPeer, "支持网络在的时候，不该写成孤立无援")
+        #expect(held.calculateEnding().title == "关卡一结束：被接住的那一次")
+
+        let seen = makeGameAtCollapse(support: 30, empathy: 70)
+        #expect(seen.chapterOneCollapse == .seenByTeacher, "老师同理心高的时候，应当写成她先看见")
+        #expect(seen.calculateEnding().title == "关卡一结束：她先看见了")
+
+        let alone = makeGameAtCollapse(support: 30, empathy: 20)
+        #expect(alone.chapterOneCollapse == .alone)
+        #expect(alone.calculateEnding().title == "关卡一结束：没人知道的那一晚")
+    }
+
+    /// 三种崩溃必须是三种不同的结尾，而且都能说出下一步该做什么。
+    @Test func everyCollapseEndingOffersADistinctNextStep() {
+        var titles: Set<String> = []
+        var stories: Set<String> = []
+        for collapse in ChapterOneCollapse.allCases {
+            let (game, _) = makeIsolatedGame()
+            game.startGame()
+            game.chapterOneCollapse = collapse
+            let ending = game.calculateEnding()
+            titles.insert(ending.title)
+            stories.insert(ending.story.body)
+            #expect(ending.story.prompt.isEmpty == false, "每种崩溃都要给出一个可以继续想的问题")
+            #expect(ending.resources.isEmpty == false, "崩溃结局必须带上心理支持资源")
+        }
+        #expect(titles.count == ChapterOneCollapse.allCases.count)
+        #expect(stories.count == ChapterOneCollapse.allCases.count)
+    }
+
+    // MARK: - 章末决策是前面回合的账单
+
+    private func addClue(_ game: GameManager, _ id: ChapterClueID) {
+        guard game.chapterClues.contains(where: { $0.id == id }) == false else { return }
+        game.chapterClues.append(
+            ChapterClue(id: id, turn: game.currentTurn, title: id.title, detail: id.detail)
+        )
+    }
+
+    private func decisionChoices(_ game: GameManager) -> [EventChoice] {
+        game.dismissChapterOnePaper()
+        guard case .event(let event) = game.gameState else { return [] }
+        return event.choices
+    }
+
+    private func detail(_ choices: [EventChoice], _ id: String) -> String {
+        choices.first { $0.id == id }?.detail ?? ""
+    }
+
+    /// 同一个按钮，做没做过功课，说法必须不一样。
+    @Test func decisionOptionsReflectWhatYouActuallyHeard() {
+        let (naive, _) = makeIsolatedGame()
+        naive.startGame()
+        let naiveChoices = decisionChoices(naive)
+        #expect(naiveChoices.count == 4, "四个选项的数量不能变")
+        #expect(detail(naiveChoices, "chapter1_teacher").contains("听出") == false)
+        #expect(detail(naiveChoices, "chapter1_monitor").contains("班长") == false)
+        #expect(detail(naiveChoices, "chapter1_tomorrow").contains("错觉") == false)
+
+        let (informed, _) = makeIsolatedGame()
+        informed.startGame()
+        addClue(informed, .teacherSigh)
+        addClue(informed, .monitorOverload)
+        addClue(informed, .hiddenCrying)
+        let informedChoices = decisionChoices(informed)
+        #expect(detail(informedChoices, "chapter1_teacher").contains("听出"))
+        #expect(detail(informedChoices, "chapter1_monitor").contains("班长"))
+        #expect(detail(informedChoices, "chapter1_tomorrow").contains("错觉"))
+    }
+
+    /// 同一个决策，听清线索之后结局写法要变——这才是"账单"。
+    @Test func informedDecisionChangesTheEndingWritten() {
+        func endingTitle(clues: [ChapterClueID], decision: String) -> String {
+            let (game, _) = makeIsolatedGame()
+            game.startGame()
+            for clue in clues { addClue(game, clue) }
+            let choices = decisionChoices(game)
+            guard let choice = choices.first(where: { $0.id == decision }) else { return "" }
+            game.resolveEventChoice(choice)
+            return game.calculateEnding().title
+        }
+
+        let naive = endingTitle(clues: [], decision: "chapter1_teacher")
+        let informed = endingTitle(clues: [.teacherSigh], decision: "chapter1_teacher")
+        #expect(naive == "关卡一完成：让成人接手")
+        #expect(informed == "关卡一完成：她知道该往哪看")
+        #expect(naive != informed, "听清与没听清不能写出同一个结尾")
+
+        // 四条决策 × 听清/没听清 = 八种第一章结局。
+        var titles: Set<String> = []
+        for id in ["chapter1_teacher", "chapter1_monitor", "chapter1_tomorrow", "chapter1_wait"] {
+            titles.insert(endingTitle(clues: [], decision: id))
+            titles.insert(endingTitle(
+                clues: [.teacherSigh, .monitorOverload, .hiddenCrying, .linChePage, .unsignedNote],
+                decision: id
+            ))
+        }
+        #expect(titles.count == 8, "四条决策各自应有听清/没听清两种写法，实际 \(titles.count)：\(titles)")
     }
 
     // MARK: - 可玩性验收（交接文档 §9.1）
@@ -427,8 +681,9 @@ struct RegressionTests {
             game.setPose(.left)
             return .observe
         case .locateHiddenSound:
+            // 这一步是听觉线索：必须朝向声源「倾听」，观察拿不到。
             game.setPose(.right)
-            return .observe
+            return .listen
         case .regulateSelf:
             return .breathe
         case .approachLinChe:

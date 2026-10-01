@@ -138,6 +138,21 @@ final class AgentGameSession {
         // 危险前兆必须和 GUI 一样可感知：P1 反馈层存在的意义就是
         // "在被抓住之前知道自己在冒险"，agent 模式看不到这一层就没法验证它。
         lines.append("  风险前兆：\(game.dangerSignalLevel.title) —— \(game.dangerSignalText)")
+
+        // 听觉世界。刻意只给玩家能听到的**原材料**（描述 + 还没听清），
+        // 不给方位结论——方位要靠声像判断，或用 `倾听` 试出来。
+        // 隐藏 `sourcePose` 是有意的：如果这里直接写出方位，
+        // "靠自己搜索"就退化成"照抄答案"了。
+        if game.audibleSignals.isEmpty {
+            lines.append("  你听到：只有笔尖、吊扇，和窗外很远的一声车。")
+        } else {
+            for signal in game.audibleSignals {
+                lines.append("  你听到：\(signal.ambiguousText)")
+            }
+        }
+        if game.listenFeedback.isEmpty == false {
+            lines.append("  上次倾听：\(game.listenFeedback)")
+        }
         lines.append("  维持形象的疲惫：\(describeInverted(p.maskCost, thresholds: (30, 55, 75)))")
         lines.append("  身边人的支持：\(describe(p.support, thresholds: (30, 55, 75)))")
         lines.append("  注意力：\(describe(p.visualAttention, thresholds: (75, 45, 20)))")
@@ -509,6 +524,11 @@ final class AgentGameSession {
     /// （写作业 / 自我照顾），而不是反复点同一个动作把回合浪费掉。
     func debugChapterWaitRemaining() -> Int {
         game.chapterOneStepsUntilReady
+    }
+
+    /// 此刻能听见、但还没听清的响动数量。
+    func debugAudibleSignalCount() -> Int {
+        game.audibleSignals.count
     }
 
     /// 玩家身体需求（供自动玩家决策）。

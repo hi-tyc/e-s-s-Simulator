@@ -457,7 +457,7 @@ final class MovementAndEventTests: XCTestCase {
 
         matureChapterOneStep(game)
         game.setPose(.right)
-        game.execute(.observe)
+        game.execute(.listen)
         XCTAssertEqual(game.chapterOneStep, .regulateSelf)
         XCTAssertEqual(game.chapterClues.map(\.id), [.linChePage, .hiddenCrying])
 

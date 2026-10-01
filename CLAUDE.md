@@ -20,8 +20,9 @@ swift run LateStudySimulator   # 构建并运行
 - 设计假设环境只有 Command Line Tools,因此用 `swift build`/`swift run` 而非 `xcodebuild`。
 - **当前开发机是 macOS(Apple Silicon),`swift build` / `swift test` 可以直接跑**(已在 Swift 6.4 / macOS 27.2 上验证)。改完之后请实际构建并跑测试,不要靠推测。
 - 若在**没有 swift 的环境**(例如 Windows)工作,则无法本地验证编译,必须明确告知用户。
-- 测试都在 `Tests/LateStudySimulatorTests/`(40 XCTest + 33 swift-testing)。
+- 测试都在 `Tests/LateStudySimulatorTests/`(40 XCTest + 42 swift-testing)。
 - 验证数值改动请用 Agent 模式:`swift test --filter PlaythroughProbe` 看逐回合数值表;`swift run LateStudySimulator --agent --auto-all` 看五种策略的结局分布。注意:五种策略的结局分布 + 探针数值表是数值平衡的主要验收手段。
+- 视觉设计约定:**任务提示只写意图与通道,不写方位与按键**。方位信息属于音频声像与视觉余光,写进提示就等于把"自己搜索"退回成"照抄答案"。有测试 `chapterOneGuidanceDoesNotHandOutTheAnswer` 守卫这条约定。
 
 ## 架构
 
@@ -46,7 +47,9 @@ swift run LateStudySimulator   # 构建并运行
 ```
 
 - **事件会打断循环**:`presentEvent` 把 `gameState` 切到 `.event`,`execute` 提前返回;`resolveEventChoice` / `continueAfterEvent` 负责恢复。新增行动逻辑时注意这个提前返回路径。
-- `teacherTurn()` 是教师 AI,根据 KPI 压力、疲劳、同理心决定巡视/提醒/放过/关心/后门观察/假巡视,并驱动被发现、崩溃等关键事件(`checkCriticalState`)。
+- `teacherTurn()` 是教师 AI,根据 KPI 压力、疲劳、同理心决定巡视/提醒/放过/关心/后门观察/假巡视,并驱动被发现、崩溃等关键事件(`checkCriticalState`)。**注意:关卡一(`activeChapter == .silentClassroom`)走自己的分支**,不经过常规的假巡视/后门观察/被发现三条路径,而是调用 `applyChapterOnePressure()`。
+- **两条信息通道**:`观察`(`observe`)拿视觉信息,`倾听`(`listen`)拿听觉信息。听觉世界由 `audibleSignals: [AudibleSignal]` 表示——响动只给模糊描述(`ambiguousText`),真实方位藏在 `sourcePose` 里,玩家用 `倾听` 对准声源才能拿到 `resolvedText` 与线索。新增听觉线索时:在 `refreshAudibleSignals()` 里登记,并让 `performListen()` 能解析它。
+- 关卡一主线有**节奏倒计时** `chapterOneWaitRemaining`:每步线索之间要等 1 个回合。它刻意用倒计时而不是"第几回合成熟",因为 `currentTurn` 在关卡一有上限,用绝对回合数会做出永远无法满足的期限并锁死主线。
 - 玩家视角(`CameraPose`)映射到 `VisionZone`,不同区消耗不同视觉注意力(`spendAttention`),影响压力和聚焦质量——这是「转头有成本」机制的核心。
 - 结局由 `calculateEnding()` / `teacherEnding()` 根据累积指标和阈值生成,附带故事、三方同理心反思、数据分析和心理支持资源。
 

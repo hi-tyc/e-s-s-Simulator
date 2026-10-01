@@ -35,12 +35,17 @@ enum AutoPlayer {
         }
     }
 
-    /// 每个策略维护自己的命令轮转索引（避免每次调用都从头开始）。
-    private static var cursor: [Strategy: Int] = [:]
+    /// 每个策略 + 每个命令列表维护自己的轮转索引。
+    ///
+    /// 原来只按策略索引，不同命令列表会**共用同一个游标**：
+    /// 等待回合用掉的索引会让"看左边 → 观察"这类成对动作错位。
+    /// 按列表签名分开之后轮转是可预测的。
+    private static var cursor: [String: Int] = [:]
 
     private static func rotate(_ strategy: Strategy, over commands: [String]) -> String {
-        let index = (cursor[strategy] ?? 0) % commands.count
-        cursor[strategy] = index + 1
+        let key = "\(strategy.rawValue)|\(commands.joined(separator: ","))"
+        let index = (cursor[key] ?? 0) % commands.count
+        cursor[key] = index + 1
         return commands[index]
     }
 
@@ -53,7 +58,7 @@ enum AutoPlayer {
     ) -> String {
         var log: [String] = []
         var actions = 0
-        cursor[strategy] = 0
+        cursor = [:]
 
         while actions < maxActions && session.isFinished == false {
             // 章节转场与纸条：自动推进
@@ -112,9 +117,17 @@ enum AutoPlayer {
 
         switch strategy {
         case .mainQuest:
-            // 等待信号成熟时，像普通玩家一样过晚自习：能量见底先恢复，
-            // 否则写作业推进进度。
+            // 等待信号成熟时，像普通玩家一样过晚自习：先照顾明显的身体信号，
+            // 再考虑去追那些旁支的听觉线索（老师的叹气、班长的停顿），
+            // 否则就去写作业推进进度。
             if session.debugPlayerNeeds().energy < 40 { return "深呼吸" }
+            // 有计划地扫听：因为方位是刻意不给玩家的，普通玩家也只能一边转一边听。
+            if session.debugAudibleSignalCount() > 0 {
+                return rotate(.mainQuest, over: [
+                    "look forward", "倾听", "look left", "倾听",
+                    "look right", "倾听", "look rear", "倾听"
+                ])
+            }
             return rotate(.mainQuest, over: ["写作业", "写作业", "看窗外"])
         case .studyOnly:
             return "写作业"
@@ -142,7 +155,8 @@ enum AutoPlayer {
         case "observeLinChe":
             return rotate(strategy, over: ["look left", "观察"])
         case "locateHiddenSound":
-            return rotate(strategy, over: ["look right", "观察"])
+            // 这一步是**听觉线索**：只有在朝向声源时倾听才拿得到。
+            return rotate(strategy, over: ["look right", "倾听"])
         case "regulateSelf":
             return rotate(strategy, over: ["深呼吸", "喝水"])
         case "approachLinChe":
