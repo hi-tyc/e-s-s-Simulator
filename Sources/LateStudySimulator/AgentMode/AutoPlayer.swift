@@ -159,6 +159,21 @@ enum AutoPlayer {
 
     /// 事件选择策略。
     private static func chooseEventChoice(_ event: ActiveEvent, strategy: Strategy) -> EventChoice {
+        // 第一章章末决策：四种策略分别走向四种不同的处理方式，
+        // 便于观察"同样的场景、不同选择"带来的差异。
+        let chapterOnePreference: [Strategy: String] = [
+            .mainQuest: "chapter1_teacher",
+            .studyOnly: "chapter1_tomorrow",
+            .selfCare: "chapter1_monitor",
+            .social: "chapter1_wait",
+            .random: ""
+        ]
+        if let wanted = chapterOnePreference[strategy],
+           wanted.isEmpty == false,
+           let choice = event.choices.first(where: { $0.id == wanted }) {
+            return choice
+        }
+
         let preferred: [String]
         switch strategy {
         case .social:
@@ -167,8 +182,11 @@ enum AutoPlayer {
             preferred = ["admit", "support", "breathe", "calm"]
         case .studyOnly:
             preferred = ["push", "reject", "smile", "ignore"]
-        case .mainQuest, .random:
+        case .mainQuest:
             preferred = []
+        case .random:
+            // 随机策略真的随机，用于探测异常路径。
+            return event.choices.randomElement() ?? event.choices[0]
         }
         if let match = event.choices.first(where: { choice in
             preferred.contains { choice.id.contains($0) }

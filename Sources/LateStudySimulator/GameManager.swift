@@ -2371,16 +2371,19 @@ final class GameManager: ObservableObject {
     private func chapterOneEnding() -> Ending {
         let clueTitles = chapterClues.map(\.title).joined(separator: "、")
         let decision = chapterOneDecision.isEmpty ? "暂未决定" : chapterOneDecision
-        let supportLine = "纸条仍然没有署名。下一章先跟随林澈进入走廊，纸条来源将在之后继续确认。"
+
+        // 按章末决策分化结局。四个选项代表四种对待"不确定"的方式，
+        // 各自的代价与收获不同，因此给出不同的标题、正文与反思。
+        let profile = chapterOneDecisionProfile(decision: decision)
 
         return Ending(
-            title: "关卡一完成：静音的教室",
-            body: "你没有看见全部真相，但已经发现了 \(chapterClues.count) 条值得被认真对待的信号：\(clueTitles.isEmpty ? "暂无明确线索" : clueTitles)。",
-            reflection: "你的章末行动是：\(decision)。\(supportLine)",
+            title: profile.title,
+            body: profile.body(chapterClues.count, clueTitles),
+            reflection: profile.reflection,
             story: EndingStory(
-                title: "关卡复盘：看见不是审判",
-                body: "这一关的目标不是猜出谁一定有问题，而是在有限视野里承认异常值得被记录。遗漏不是失败，强行拯救也不是答案；重要的是找到能一起承担的人。",
-                prompt: "回想这一关：哪个信号最早出现？你当时是选择确认、等待，还是继续完成自己的事？"
+                title: profile.storyTitle,
+                body: profile.storyBody,
+                prompt: profile.storyPrompt
             ),
             empathyReflections: [
                 EmpathyReflection(role: "苏念", icon: "person.fill", text: "你是心理委员，但不是专业咨询师。你能做的是看见、记录、陪在附近，并在风险升高时找到成人或同伴支持。"),
@@ -2390,12 +2393,94 @@ final class GameManager: ObservableObject {
             relationshipEchoes: relationshipEchoes(),
             analysis: [
                 EndingMetric(title: "可靠线索", value: "\(chapterClues.count)", note: "来自实际观察，而不是状态数值或系统判断"),
-                EndingMetric(title: "章末行动", value: decision, note: "第一章固定进入走廊主线，不设置安全性错误分支"),
-                EndingMetric(title: "支持方式", value: player.helpedClassmate ? "已有连接" : "尚未外显", note: "低声询问、纸条和共同判断都会改变后续关系")
+                EndingMetric(title: "章末行动", value: decision, note: profile.actionNote),
+                EndingMetric(title: "支持方式", value: player.helpedClassmate ? "已有连接" : "尚未外显", note: "低声询问、纸条和共同判断都会改变后续关系"),
+                EndingMetric(title: "自我照顾", value: "\(Int(player.psychicEnergy))", note: "你在完成这件事的过程中，是否还在照顾自己"),
+                EndingMetric(title: "面具成本", value: "\(Int(player.maskCost))", note: "维持“没事”的表象所需付出的代价")
             ],
             comparisons: endingComparisons(),
             resources: supportResources()
         )
+    }
+
+    /// 章末决策对应的结局文案。四个选项代表四种面对不确定性的方式。
+    private struct ChapterOneEndingProfile {
+        let title: String
+        let actionNote: String
+        let reflection: String
+        let storyTitle: String
+        let storyBody: String
+        let storyPrompt: String
+        let body: (Int, String) -> String
+
+        static func make(decision: String) -> ChapterOneEndingProfile {
+            switch decision {
+            case "交给方老师":
+                return ChapterOneEndingProfile(
+                    title: "关卡一完成：让成人接手",
+                    actionNote: "承认这件事不该由一个人扛",
+                    reflection: "把线索交给成人，意味着你接受了“我无法独自解决”这个事实。这不是推卸，而是让支持链开始运转。",
+                    storyTitle: "复盘：求助是一种行动",
+                    storyBody: "你没有独自消化那张纸条。很多时候，学生不敢交给老师，是担心被当成“打小报告”或让当事人被曝光。但你提供的是线索，不是判决——这把事情从“猜”变成了“可以一起看”。",
+                    storyPrompt: "如果你担心交出去会让对方被曝光，有没有一种方式，既保护当事人，也让成人知道该往哪里看？",
+                    body: { count, clues in
+                        "你没有看见全部真相，但已经发现了 \(count) 条值得被认真对待的信号：\(clues.isEmpty ? "暂无明确线索" : clues)。你把它们交了出去。"
+                    }
+                )
+            case "找可靠班干部共同判断":
+                return ChapterOneEndingProfile(
+                    title: "关卡一完成：同伴协作链",
+                    actionNote: "把责任分给另一个同样在意的人",
+                    reflection: "你选择了同伴而不是权威。这更接近学生之间真实的支持方式，但也意味着责任被分摊、判断可能被稀释。",
+                    storyTitle: "复盘：一起担比一个人扛更稳",
+                    storyBody: "你找到了另一个愿意一起看的人。支持链上多了一个节点，风险不再只压在你身上。但也要留意：同伴也会累，也要问他愿不愿意继续。",
+                    storyPrompt: "当支持链里另一个人也开始疲惫时，你们打算怎么轮流承担？",
+                    body: { count, clues in
+                        "你记录了 \(count) 条线索：\(clues.isEmpty ? "暂无明确线索" : clues)。这一次不是你一个人在看。"
+                    }
+                )
+            case "明天再确认":
+                return ChapterOneEndingProfile(
+                    title: "关卡一完成：带着不确定入睡",
+                    actionNote: "保留边界，也留下了空白",
+                    reflection: "你选择了尊重边界。这是合理的选择，但不确定不会因为被搁置而消失——它只是被带到了明天。",
+                    storyTitle: "复盘：等待也是一种选择",
+                    storyBody: "不是所有事情都必须当晚解决。你把纸条收好，告诉自己明天再说。这是对边界的尊重，也可能让信息窗口悄悄关闭。关键在于：明天你真的会问吗？",
+                    storyPrompt: "如果把这件事留到明天，你需要什么条件，才能让它不被日常淹没？",
+                    body: { count, clues in
+                        "线索停在 \(count) 条：\(clues.isEmpty ? "暂无明确线索" : clues)。你把判断留给了明天。"
+                    }
+                )
+            case "下课后在走廊等一等":
+                return ChapterOneEndingProfile(
+                    title: "关卡一完成：留下来的人",
+                    actionNote: "不追问、不围堵，只留一个可以开口的位置",
+                    reflection: "你没有替对方决定，也没有走开。你只是让人知道，这条走廊里多了一个愿意等的人。",
+                    storyTitle: "复盘：陪伴的分寸",
+                    storyBody: "等待比追问更难。你不知道他会不会出来，也不知道该说什么。但“有人在这里”本身就可能是一种支持——前提是你也照顾好自己的时间和情绪。",
+                    storyPrompt: "如果他没有出来，你打算怎么面对这份落空？",
+                    body: { count, clues in
+                        "你带着 \(count) 条线索走到走廊：\(clues.isEmpty ? "暂无明确线索" : clues)。你决定不追问，只留下一个位置。"
+                    }
+                )
+            default:
+                return ChapterOneEndingProfile(
+                    title: "关卡一完成：静音的教室",
+                    actionNote: "第一章固定进入走廊主线，不设置安全性错误分支",
+                    reflection: "这一关的目标不是猜出谁一定有问题，而是在有限视野里承认异常值得被记录。遗漏不是失败，强行拯救也不是答案；重要的是找到能一起承担的人。",
+                    storyTitle: "关卡复盘：看见不是审判",
+                    storyBody: "你在有限视角里看见了几个信号。看见不等于确诊，也不等于必须立刻解决；它只是让沉默第一次有了名字。",
+                    storyPrompt: "回想这一关：哪个信号最早出现？你当时是选择确认、等待，还是继续完成自己的事？",
+                    body: { count, clues in
+                        "你没有看见全部真相，但已经发现了 \(count) 条值得被认真对待的信号：\(clues.isEmpty ? "暂无明确线索" : clues)。"
+                    }
+                )
+            }
+        }
+    }
+
+    private func chapterOneDecisionProfile(decision: String) -> ChapterOneEndingProfile {
+        ChapterOneEndingProfile.make(decision: decision)
     }
 
     private func teacherEnding() -> Ending {
