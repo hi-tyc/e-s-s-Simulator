@@ -52,6 +52,11 @@ final class AgentGameSession {
 
     let omniscient: Bool
 
+    /// 是否使用带光照的真彩渲染（默认开启）。
+    var useColorRendering = true
+    /// 是否输出 ANSI 颜色码。纯文本环境可关闭。
+    var supportsANSI = true
+
     // MARK: - 状态查询
 
     var isFinished: Bool {
@@ -87,7 +92,13 @@ final class AgentGameSession {
     func renderDefaultView() -> String {
         var out: [String] = []
         out.append(renderHeader())
-        out.append(SceneASCIIRenderer.render(game: game))
+        // 默认使用带光照的真彩渲染；无颜色环境可回退到线框渲染。
+        if useColorRendering {
+            let context = SceneRGBRenderer.context(game: game)
+            out.append(SceneRGBRenderer.render(context: context, colored: supportsANSI))
+        } else {
+            out.append(SceneASCIIRenderer.render(game: game))
+        }
         out.append(renderLegend())
         out.append(renderSubjectiveState())
         if omniscient { out.append(renderOmniscientState()) }
@@ -284,6 +295,14 @@ final class AgentGameSession {
             return .ok(renderDefaultView())
         case "omniscient":
             return .ok(renderOmniscientState())
+        case "frame":
+            return .ok(frameJSON())
+        case "noColor":
+            supportsANSI = false
+            return .ok("已关闭 ANSI 颜色（纯字符密度）。")
+        case "color":
+            supportsANSI = true
+            return .ok("已开启 ANSI 真彩。")
         case "history":
             return .ok(renderHistory())
         case "quit":
@@ -487,6 +506,53 @@ final class AgentGameSession {
         return (p.psychicEnergy, p.thirst, p.hunger, p.bladder)
     }
 
+    /// 导出当前画面的**逐像素 RGB 数据**，供 AI 精确理解场景。
+    ///
+    /// 每格包含：字符、十六进制颜色、亮度、命中的物体名、距离。
+    /// 采样分辨率可调，默认降到 24x10 以控制输出体积。
+    func frameJSON(cols: Int = 24, rows: Int = 10) -> String {
+        let context = SceneRGBRenderer.context(game: game)
+        let grid = SceneRGBRenderer.sample(context: context, width: cols, height: rows)
+
+        let rowsJSON: [[[String: Any]]] = grid.map { row in
+            row.map { pixel in
+                var cell: [String: Any] = [
+                    "ch": String(pixel.glyph),
+                    "hex": pixel.color.hex,
+                    "lum": (pixel.luminance * 100).rounded() / 100
+                ]
+                if let name = pixel.entityName {
+                    cell["obj"] = name
+                    cell["dist"] = (pixel.distance * 10).rounded() / 10
+                }
+                return cell
+            }
+        }
+
+        let payload: [String: Any] = [
+            "cols": cols,
+            "rows": rows,
+            "camera": [
+                "pose": game.cameraPose.rawValue,
+                "posture": game.player.posture == .seated ? "seated" : "standing"
+            ],
+            "lighting": [
+                "period": game.currentPeriod.displayName,
+                "ambientIntensity": (context.ambientIntensity * 100).rounded() / 100,
+                "saturation": (context.saturation * 100).rounded() / 100,
+                "vignette": (context.vignette * 100).rounded() / 100,
+                "pointLights": context.pointLights.count
+            ],
+            "grid": rowsJSON
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
+    }
+
     /// 导出机器可读的状态（供 AI 程序化消费）。
     func stateJSON() -> String {
         let p = game.player
@@ -560,6 +626,8 @@ final class AgentGameSession {
           door <front|rear> <open|close>
           state               重新渲染当前画面
           omniscient          查看全知视角（所有隐藏数值）
+          frame               输出逐像素 RGB 数据（JSON，供 AI 精确解析画面）
+          color / noColor     开关 ANSI 真彩输出
           history             查看动作历史与数值变化
           help                显示本说明
           quit                结束会话
