@@ -78,6 +78,8 @@ final class GameManager: ObservableObject {
     @Published var hasTriggeredClassmateHelpRequest: Bool = false
     @Published var hasTriggeredSupportNetworkProtection: Bool = false
     @Published var hasTriggeredEnergyExhaustion: Bool = false
+    /// 本局内"能量见底"触发的次数。用于递减恢复幅度，形成"越硬撑代价越大"的曲线。
+    private var exhaustionEventsThisRun = 0
     @Published var hasTriggeredClassmateReport: Bool = false
     @Published var hasTriggeredMemoryTrust: Bool = false
     @Published var hasTriggeredMemorySuspicion: Bool = false
@@ -333,6 +335,7 @@ final class GameManager: ObservableObject {
         hasTriggeredClassmateHelpRequest = false
         hasTriggeredSupportNetworkProtection = false
         hasTriggeredEnergyExhaustion = false
+        exhaustionEventsThisRun = 0
         hasTriggeredClassmateReport = false
         hasTriggeredMemoryTrust = false
         hasTriggeredMemorySuspicion = false
@@ -2048,6 +2051,9 @@ final class GameManager: ObservableObject {
             updatePerception()
             clampPlayer()
             maybeAddAnomalyMonologue()
+            // 第一章同样需要临界反馈：能量见底时给出"撑不住了"的出口，
+            // 否则玩家会在数值无法挽回的情况下继续点十几回合而毫无反馈。
+            checkPlayerExhaustion()
             return
         }
 
@@ -2190,8 +2196,14 @@ final class GameManager: ObservableObject {
     }
 
     private func checkCriticalState() {
+        // 章节一的异常独白始终检查。
+        maybeAddAnomalyMonologue()
+
+        // 第一章同样需要"能量见底"的反馈。
+        // 注意：章节一有明确的主线推进节奏，因此这里只处理玩家自身的耗尽，
+        // 不触发同桌崩溃 / 孤独等需要剧情铺陈的事件。
         if activeChapter == .silentClassroom {
-            maybeAddAnomalyMonologue()
+            checkPlayerExhaustion()
             return
         }
         if let crying = classmates.first(where: { $0.state == .crying }), player.helpedClassmate == false {
@@ -2231,46 +2243,81 @@ final class GameManager: ObservableObject {
             return
         }
 
-        if player.psychicEnergy <= 5 || player.stress >= 96 {
-            if player.support > 55 {
-                // 仅在第一次触发时给出支持网络事件，避免同一局内无限复现。
-                guard hasTriggeredSupportNetworkProtection == false else { return }
-                hasTriggeredSupportNetworkProtection = true
-                player.psychicEnergy = 24
-                player.stress = 62
-                appendEvent(title: "支持网络保护", detail: "同桌的主动关心把你从崩溃边缘拉回来了。")
-                presentEvent(
-                    kind: .supportOffer,
-                    title: "支持网络保护",
-                    body: "同桌注意到你不对劲，轻轻推来一张纸：要不要先喘口气？支持网络在崩溃前接住了你。",
-                    choices: [
-                        EventChoice(id: "accept_support", title: "接受帮助", detail: "能量恢复，面具成本下降"),
-                        EventChoice(id: "smile_only", title: "只笑一下", detail: "保持距离，少量恢复"),
-                        EventChoice(id: "reject_support", title: "推回纸条", detail: "维持面具，关系受损")
-                    ]
-                )
-                addAudioCue(.paper, direction: "左侧近处", intensity: 0.58, note: "一张纸的摩擦声成了求助入口。")
-            } else if hasTriggeredEnergyExhaustion == false {
-                // 能量彻底耗尽时先给一次"撑不住了"的强制事件，而不是直接结束。
-                // 否则玩家会在数值早已无法挽回的情况下继续点十几回合，毫无反馈。
-                hasTriggeredEnergyExhaustion = true
-                player.psychicEnergy = 14
-                player.stress = max(40, player.stress - 18)
-                appendEvent(title: "撑不住了", detail: "你意识到自己已经没法再假装正常。身体先替你做了决定。")
-                presentEvent(
-                    kind: .playerBreakdown,
-                    title: "撑不住了",
-                    body: "笔尖停在纸上很久没有动。你不是不想继续，是身体已经不允许。你需要现在做一件事：承认它，或者继续硬撑。",
-                    choices: [
-                        EventChoice(id: "admit_exhaustion", title: "承认累了", detail: "压力下降，支持上升，作业进度停滞"),
-                        EventChoice(id: "push_through", title: "继续硬撑", detail: "维持脸色，但压力与面具成本继续累积")
-                    ]
-                )
-                addAudioCue(.heartbeat, direction: "颅内", intensity: 0.82, note: "能量见底时，心跳声盖过了笔尖。")
-            } else {
-                finish()
+        checkPlayerExhaustion()
+    }
+
+    /// 玩家能量见底时的出口（第一章与后续章节共用）。
+    ///
+    /// 设计意图：不让"能量归零"变成无反馈的卡死状态。
+    private func checkPlayerExhaustion() {
+        guard player.psychicEnergy <= 5 || player.stress >= 96 else { return }
+
+        if player.support > 55 {
+            // 支持网络是"被动接住"，每次能量见底都可以触发，
+            // 但有递减：每触发一次，所需支持度更高。
+            guard exhaustionEventsThisRun < 3 else { return }
+            guard player.support > 55 + Double(exhaustionEventsThisRun) * 8 else {
+                triggerExhaustionEvent()
+                return
             }
+            exhaustionEventsThisRun += 1
+            player.psychicEnergy = 24
+            player.stress = 62
+            appendEvent(title: "支持网络保护", detail: "同桌的主动关心把你从崩溃边缘拉回来了。")
+            presentEvent(
+                kind: .supportOffer,
+                title: "支持网络保护",
+                body: "同桌注意到你不对劲，轻轻推来一张纸：要不要先喘口气？支持网络在崩溃前接住了你。",
+                choices: [
+                    EventChoice(id: "accept_support", title: "接受帮助", detail: "能量恢复，面具成本下降"),
+                    EventChoice(id: "smile_only", title: "只笑一下", detail: "保持距离，少量恢复"),
+                    EventChoice(id: "reject_support", title: "推回纸条", detail: "维持面具，关系受损")
+                ]
+            )
+            addAudioCue(.paper, direction: "左侧近处", intensity: 0.58, note: "一张纸的摩擦声成了求助入口。")
+        } else {
+            triggerExhaustionEvent()
         }
+    }
+
+    /// 能量见底时的出口。
+    ///
+    /// 设计意图：不让"能量归零"变成无反馈的卡死状态。每次见底都会给出
+    /// 一次抉择（承认疲惫 / 继续硬撑），并附带一轮恢复，让玩家能继续玩下去。
+    ///
+    /// 但恢复幅度随触发次数递减（第 1 次回 14，第 2 次回 9，第 3 次回 5），
+    /// 形成"每次硬撑代价更大"的压力曲线；第 3 次之后不再给出口，直接结算。
+    private func triggerExhaustionEvent() {
+        let recoveryTable: [Double] = [14, 9, 5]
+        guard exhaustionEventsThisRun < recoveryTable.count else {
+            // 连续三次见底仍无法恢复，说明这一晚已经走到尽头。
+            finish()
+            return
+        }
+        let recovery = recoveryTable[exhaustionEventsThisRun]
+        exhaustionEventsThisRun += 1
+        player.psychicEnergy = recovery
+        player.stress = max(40, player.stress - 18)
+
+        let attempt = exhaustionEventsThisRun
+        appendEvent(
+            title: "撑不住了",
+            detail: attempt == 1
+                ? "你意识到自己已经没法再假装正常。身体先替你做了决定。"
+                : "这是今晚第 \(attempt) 次触底。恢复一次比一次更难。"
+        )
+        presentEvent(
+            kind: .playerBreakdown,
+            title: attempt == 1 ? "撑不住了" : "又撑不住了（第 \(attempt) 次）",
+            body: attempt == 1
+                ? "笔尖停在纸上很久没有动。你不是不想继续，是身体已经不允许。你需要现在做一件事：承认它，或者继续硬撑。"
+                : "身体再次发出同样的信号。你已经知道硬撑的代价，但现在还有别的选择吗？承认累不是放弃，是止损。",
+            choices: [
+                EventChoice(id: "admit_exhaustion", title: "承认累了", detail: "压力下降，支持上升，作业进度停滞"),
+                EventChoice(id: "push_through", title: "继续硬撑", detail: "维持脸色，但压力与面具成本继续累积")
+            ]
+        )
+        addAudioCue(.heartbeat, direction: "颅内", intensity: 0.82, note: "能量见底时，心跳声盖过了笔尖。")
     }
 
     private func finish() {
