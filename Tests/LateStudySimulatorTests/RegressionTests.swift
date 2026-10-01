@@ -15,6 +15,25 @@ struct RegressionTests {
         return (GameManager(store: defaults), defaults)
     }
 
+    /// 把时间推进到"当前主线步骤已成熟"。
+    ///
+    /// 第一章现在有节奏门槛：每步线索之间要等信号成熟（`chapterOneStepReadyTurn`）。
+    /// 测试直接把回合推过去，而不是让脚本猜要等几个回合——这样节奏参数调整时
+    /// 这些测试仍然只验证"顺序正确"，不验证"具体等了几回合"。
+    private func matureChapterOneStep(_ game: GameManager) {
+        var safety = 0
+        while game.chapterOneStepsUntilReady > 0 && safety < 30 {
+            // 等待回合必须由**真实行动**消耗掉：节奏的倒计时挂在
+            // `collectChapterClue` 上，只有玩家行动才会推进。
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+            } else {
+                game.execute(.study)
+            }
+            safety += 1
+        }
+    }
+
     // MARK: - 座位与同桌
 
     /// 玩家座位必须固定，否则剧情文案、同桌系统与教师视线都会错位。
@@ -204,21 +223,59 @@ struct RegressionTests {
         game.execute(.observe)
         #expect(game.chapterOneStep == .locateHiddenSound)
 
+        matureChapterOneStep(game)
         game.setPose(.right)
         game.execute(.observe)
         #expect(game.chapterOneStep == .regulateSelf)
 
+        matureChapterOneStep(game)
         game.execute(.breathe)
         #expect(game.chapterOneStep == .approachLinChe)
 
+        matureChapterOneStep(game)
         game.execute(.talk)
         #expect(game.chapterOneStep == .inspectNote)
 
+        matureChapterOneStep(game)
         game.setPose(.desk)
         game.execute(.observe)
         #expect(game.chapterOneStep == .followLinChe)
         #expect(game.chapterClues.count == 3)
     }
+
+    /// 时机未到时，主线不能靠反复点同一个动作提前推进。
+    ///
+    /// 这是"等待也是节奏"的守卫：如果没有这道门槛，第一章又会退回
+    /// 6 回合的情报冲刺，数值没有时间积累。
+    @Test func mainQuestStepsWaitForTheirMoment() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        game.setPose(.left)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .locateHiddenSound)
+        #expect(game.chapterOneStepsUntilReady > 0)
+
+        let exposureAfterClue = game.player.exposure
+        let turnAfterClue = game.currentTurn
+
+        // 时机未到时，用正确的动作催线索也不会前进（但回合照常流逝）。
+        game.setPose(.right)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .locateHiddenSound)
+        #expect(game.currentTurn > turnAfterClue)
+
+        // 而且催线索不是免费的：暴露照常上升。
+        #expect(game.player.exposure > exposureAfterClue)
+
+        // 等信号自己成熟之后，同一个动作就能推进。
+        matureChapterOneStep(game)
+        game.setPose(.right)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .regulateSelf)
+    }
+
 
     // MARK: - 身体需求
 
@@ -236,6 +293,246 @@ struct RegressionTests {
         #expect(game.player.thirst > thirst)
         #expect(game.player.hunger > hunger)
         #expect(game.player.bladder > bladder)
+    }
+
+    /// 守卫：关卡一的节奏门槛不能把主线锁死。
+    ///
+    /// 真实踩到过的坑：等待原本用"第几个回合成熟"表示，而 `currentTurn`
+    /// 在关卡一有 `maxTurns` 上限。一旦期限超过上限就永远无法满足，
+    /// 主线会永久卡在同一个步骤（自动游玩 8 次里有 7 次停在 inspectNote）。
+    /// 现在等待是"还要等几个回合"的倒计时，只依赖玩家行动，因此不可能卡住。
+    @Test func chapterOnePacingCannotDeadlockAtTurnCap() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        // 直接把回合数顶到上限，模拟"玩家在关卡一已经待到很晚"。
+        game.currentTurn = game.maxTurns
+
+        game.setPose(.left)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .locateHiddenSound)
+        #expect(game.chapterOneStepsUntilReady > 0)
+
+        // 即使回合数已经到顶，等待也必须能被行动消耗完。
+        var actions = 0
+        while game.chapterOneStepsUntilReady > 0 && actions < 10 {
+            game.setPose(.right)
+            game.execute(.observe)
+            actions += 1
+        }
+        #expect(game.chapterOneStepsUntilReady == 0, "等待回合必须能被行动消耗掉")
+
+        game.setPose(.right)
+        game.execute(.observe)
+        #expect(game.chapterOneStep == .regulateSelf, "回合数到顶后主线仍然必须能推进")
+    }
+
+    /// 守卫：关卡一不能被自由活动锁死。
+    ///
+    /// 另一个真实踩到的死锁：事件往返会走到 `continueAfterEvent()`，
+    /// 而它原本无条件调用 `applyTimeProgression()`。如果那一刻钟点正好落在
+    /// 课间，就会启动自由活动；自由活动期间 `setPose` 是空操作，于是
+    /// "低头看桌面的纸条"这一步永远无法满足，主线永久卡死
+    /// （自动游玩跑到 inspectNote 就再也推进不了）。
+    @Test func chapterOneNeverEntersFreeRoam() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        // 找到本局的第一个课间回合。`continueAfterEvent()` 会先把回合 +1，
+        // 所以时间要停在它的前一个回合。
+        // （不写死回合数，避免时段划分调整后这条测试失去意义。）
+        var breakTurn = 0
+        for turn in 1...game.maxTurns where breakTurn == 0 {
+            game.currentTurn = turn
+            if game.currentPeriod.isBreak { breakTurn = turn }
+        }
+        #expect(breakTurn > 1, "前提：本局应当存在课间回合")
+
+        game.currentTurn = breakTurn - 1
+        game.continueAfterEvent()
+        #expect(game.currentPeriod.isBreak, "前提：这一步事件往返确实落在课间")
+
+        #expect(game.freeRoam.isActive == false, "关卡一不应进入自由活动")
+        // 视角必须仍然可用：这正是主线推进所依赖的东西。
+        game.setPose(.desk)
+        #expect(game.cameraPose == .desk)
+    }
+
+    // MARK: - 可玩性验收（交接文档 §9.1）
+
+    /// 按主线推进，并像真实玩家一样用等待回合"过晚自习"。
+    ///
+    /// 返回本局的观测量，供下面几条验收测试共用。
+    private struct MainQuestRun {
+        var minEnergy: Double
+        var maxExposure: Double
+        var turns: Int
+        var warnings: Int
+        var endingTitle: String
+    }
+
+    private func runMainQuestPath(_ game: GameManager, maxTurns: Int = 24) -> MainQuestRun {
+        var minEnergy = game.player.psychicEnergy
+        var maxExposure = game.player.exposure
+        var warnings = 0
+        var turns = 0
+
+        for turn in 1...maxTurns {
+            turns = turn
+            if game.isChapterOneTransitionPresented { game.enterChapterTwo() }
+            if game.isChapterOnePaperPresented { game.dismissChapterOnePaper() }
+
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+            } else {
+                if case .ending = game.gameState { break }
+                game.execute(mainQuestAction(game))
+                if case .event(let event) = game.gameState {
+                    game.resolveEventChoice(event.choices[0])
+                } else if game.isChapterOneTransitionPresented {
+                    game.enterChapterTwo()
+                    if game.isChapterOnePaperPresented { game.dismissChapterOnePaper() }
+                    if case .event(let event) = game.gameState {
+                        game.resolveEventChoice(event.choices[0])
+                    }
+                }
+            }
+
+            minEnergy = min(minEnergy, game.player.psychicEnergy)
+            maxExposure = max(maxExposure, game.player.exposure)
+            warnings = max(warnings, game.player.teacherWarnings)
+            if case .ending = game.gameState { break }
+        }
+
+        minEnergy = min(minEnergy, game.player.psychicEnergy)
+        maxExposure = max(maxExposure, game.player.exposure)
+        return MainQuestRun(
+            minEnergy: minEnergy,
+            maxExposure: maxExposure,
+            turns: turns,
+            warnings: warnings,
+            endingTitle: game.calculateEnding().title
+        )
+    }
+
+    /// 主线推进动作；时机未到就用等待回合过晚自习。
+    private func mainQuestAction(_ game: GameManager) -> PlayerAction {
+        if game.chapterOneStepsUntilReady > 0 {
+            return game.player.psychicEnergy < 45 ? .breathe : .study
+        }
+        switch game.chapterOneStep {
+        case .observeLinChe:
+            game.setPose(.left)
+            return .observe
+        case .locateHiddenSound:
+            game.setPose(.right)
+            return .observe
+        case .regulateSelf:
+            return .breathe
+        case .approachLinChe:
+            return .talk
+        case .inspectNote:
+            game.setPose(.desk)
+            return .observe
+        case .followLinChe, .completed:
+            return .leaveSeat
+        }
+    }
+
+    /// 验收 §9.1：认真走主线的玩家必须真的感觉到压力。
+    ///
+    /// 改之前：暴露最高 45、能量最低 65，整局没有任何数值进入危险区。
+    /// 这条测试把这个失败状态钉死，防止以后又改回"安全主线"。
+    @Test func mainQuestPathCarriesRealRisk() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        let run = runMainQuestPath(game)
+
+        #expect(run.maxExposure >= 60, "主线暴露应至少达到 60，实际 \(run.maxExposure)")
+        #expect(run.minEnergy < 35, "主线能量应至少一次低于 35，实际最低 \(run.minEnergy)")
+        #expect(run.turns >= 10, "主线应铺满整晚而不是 6 回合冲刺，实际 \(run.turns)")
+        #expect(game.chapterOneStep == .completed, "主线必须仍然可以走完")
+    }
+
+    /// 验收 §9.1：危险必须在被抓住之前就能被感觉到。
+    @Test func exposureLadderIsReadable() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+
+        game.player.exposure = 10
+        #expect(game.exposureSignal == .calm)
+        game.player.exposure = 35
+        #expect(game.exposureSignal == .noticed)
+        game.player.exposure = 58
+        #expect(game.exposureSignal == .watched)
+        game.player.exposure = 80
+        #expect(game.exposureSignal == .targeted)
+
+        // 每一级都必须有一句玩家能读懂的感受文案。
+        for signal in ExposureSignal.allCases {
+            #expect(signal.detail.isEmpty == false)
+            #expect(signal.title.isEmpty == false)
+        }
+        // 分级必须单调，不能出现"更危险反而提示更轻"的情况。
+        #expect(ExposureSignal.calm < ExposureSignal.noticed)
+        #expect(ExposureSignal.noticed < ExposureSignal.watched)
+        #expect(ExposureSignal.watched < ExposureSignal.targeted)
+    }
+
+    /// 根因 A 的守卫：恢复动作不能是无脑最优解。
+    @Test func breathingHasDiminishingReturnsWithinAPeriod() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        // 把压力推高，确保每次深呼吸都有"东西可以释放"。
+        game.player.stress = 80
+        let firstGain = measuredBreathGain(game)
+
+        game.player.stress = 80
+        let secondGain = measuredBreathGain(game)
+        game.player.stress = 80
+        let thirdGain = measuredBreathGain(game)
+
+        #expect(firstGain > secondGain, "第二次深呼吸的恢复必须低于第一次")
+        #expect(secondGain > thirdGain, "第三次深呼吸的恢复必须继续递减")
+        #expect(firstGain > 0)
+    }
+
+    /// 在同一次行动前后测能量差，隔离掉其他数值的干扰。
+    private func measuredBreathGain(_ game: GameManager) -> Double {
+        let before = game.player.psychicEnergy
+        game.execute(.breathe)
+        return game.player.psychicEnergy - before
+    }
+
+    /// 根因 C 的守卫：关卡一的暴露必须真的会带来后果。
+    ///
+    /// 改之前 `teacherTurn()` 在 `.silentClassroom` 直接 return，
+    /// 导致"被发现 / 假巡视 / 后门观察"在关卡一里完全不可达。
+    @Test func chapterOneExposureEventuallyGetsYouNoticed() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        // 越过 70 的第一个回合只是"被盯住"（缓冲回合），不会被抓。
+        game.player.exposure = 78
+        game.setPose(.left)
+        game.execute(.observe)
+        #expect(game.player.teacherWarnings == 0, "越过危险线时先给一个可反应的缓冲回合")
+        #expect(game.player.exposure >= 70, "缓冲回合里暴露还没有回落")
+
+        // 第二个回合仍留在线上，才会真的被看见。
+        game.player.exposure = 78
+        game.setPose(.left)
+        game.execute(.observe)
+        #expect(game.player.exposure < 70, "被看见后暴露必须回落到安全区")
+        #expect(game.player.teacherWarnings >= 1, "必须记录一次“被看见”")
+        #expect(game.player.maskCost > PlayerState().maskCost, "被看见要付出面具成本")
     }
 
     // MARK: - 无障碍偏好持久化

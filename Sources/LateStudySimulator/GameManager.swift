@@ -50,6 +50,9 @@ final class GameManager: ObservableObject {
     @Published var viewMode: ViewMode = .student
     @Published var selectedTeacherTargetID: Int?
     @Published var message: String = "晚自习开始。教室里的笔尖声和风扇声混在一起。"
+    /// 当前暴露分级的可读提示（P1 反馈层）。由 `updatePerception()` 每回合刷新。
+    @Published var dangerSignalText: String = ExposureSignal.calm.detail
+    @Published var dangerSignalLevel: ExposureSignal = .calm
     @Published var classmates: [Classmate] = []
     @Published var eventLog: [EventLogEntry] = []
     @Published var audioCues: [AudioCue] = []
@@ -64,6 +67,18 @@ final class GameManager: ObservableObject {
     @Published var featuredMonologue: FeaturedMonologue?
     @Published var activeChapter: StoryChapter = .silentClassroom
     @Published var chapterOneStep: ChapterOneStep = .observeLinChe
+    /// 当前主线步骤还需要"等"几个回合。
+    ///
+    /// 设计意图（见交接文档 4.3 方案 A）：第一章原本 6 步 = 6 回合就走完，
+    /// 占 18 回合预算的 1/3，导致能量与暴露都没有时间积累。
+    /// 现在每一步完成后需要等信号成熟，等待期间玩家必须真的"过这个晚自习"
+    /// （写作业、照顾身体需求、承受巡视），主线因此自然铺满整晚，
+    /// 数值也有了可以下滑的空间。等待本身不是惩罚，而是节奏。
+    ///
+    /// 刻意用**倒计时**而不是"第几回合成熟"：`currentTurn` 在关卡一有上限，
+    /// 用绝对回合数会做出一个永远无法满足的期限，把主线彻底锁死。
+    /// 倒计时只依赖"玩家反正会行动"，因此不可能卡住。
+    @Published var chapterOneWaitRemaining: Int = 0
     @Published var chapterClues: [ChapterClue] = []
     @Published var hasPresentedChapterOneDecision: Bool = false
     @Published var chapterOneDecision: String = ""
@@ -80,6 +95,12 @@ final class GameManager: ObservableObject {
     @Published var hasTriggeredEnergyExhaustion: Bool = false
     /// 本局内"能量见底"触发的次数。用于递减恢复幅度，形成"越硬撑代价越大"的曲线。
     private var exhaustionEventsThisRun = 0
+    /// 本节课内已使用的深呼吸次数，用于计算耐受衰减。进入新时段时重置。
+    private var breatheUsesThisPeriod = 0
+    /// 上面那个计数属于哪个时段；时段变化时重置耐受。
+    private var breatheUsesPeriod: StudyPeriod?
+    /// 已经在"被盯住"区间停留了几个回合（关卡一的缓冲回合计数）。
+    private var chapterOneTargetedTurns = 0
     @Published var hasTriggeredClassmateReport: Bool = false
     @Published var hasTriggeredMemoryTrust: Bool = false
     @Published var hasTriggeredMemorySuspicion: Bool = false
@@ -324,6 +345,9 @@ final class GameManager: ObservableObject {
         monologueDismissTask?.cancel()
         chapterClues = []
         chapterOneStep = .observeLinChe
+        chapterOneWaitRemaining = 0
+        dangerSignalText = ExposureSignal.calm.detail
+        dangerSignalLevel = .calm
         hasPresentedChapterOneDecision = false
         chapterOneDecision = ""
         lastAnomalyMonologueTurn = [:]
@@ -336,6 +360,9 @@ final class GameManager: ObservableObject {
         hasTriggeredSupportNetworkProtection = false
         hasTriggeredEnergyExhaustion = false
         exhaustionEventsThisRun = 0
+        breatheUsesThisPeriod = 0
+        breatheUsesPeriod = nil
+        chapterOneTargetedTurns = 0
         hasTriggeredClassmateReport = false
         hasTriggeredMemoryTrust = false
         hasTriggeredMemorySuspicion = false
@@ -417,6 +444,9 @@ final class GameManager: ObservableObject {
         featuredMonologue = nil
         monologueDismissTask?.cancel()
         chapterClues = []
+        chapterOneWaitRemaining = 0
+        dangerSignalText = ExposureSignal.calm.detail
+        dangerSignalLevel = .calm
         hasPresentedChapterOneDecision = false
         chapterOneDecision = ""
         lastAnomalyMonologueTurn = [:]
@@ -894,11 +924,87 @@ final class GameManager: ObservableObject {
     }
 
     var chapterProgressText: String {
-        chapterOneStep.guidance
+        guard chapterOneStepsUntilReady > 0 else { return chapterOneStep.guidance }
+        return "\(chapterOneStep.guidance)（时机未到，还需 \(chapterOneStepsUntilReady) 个回合）"
     }
 
     var chapterCurrentObjective: String {
-        chapterOneStep.objective
+        guard chapterOneStepsUntilReady > 0 else { return chapterOneStep.objective }
+        return "先稳住这一晚：把注意力放回作业，等信号自己出现"
+    }
+
+    /// 当前主线步骤的成熟节奏：两条线索之间要等几个回合。
+    ///
+    /// 取值来自实测：6 个步骤各等 1 回合，第一章铺满约 11-12 个回合，
+    /// 正好落在 18 回合的晚自习预算内，数值也刚好有下滑的空间。
+    static let chapterOneStepPacingTurns = 1
+
+    /// 推进一个主线步骤的暴露代价。
+    ///
+    /// 这是让主线"不再安全"的关键：5 次推进共 +30 暴露，叠加观察与低语的代价，
+    /// 认真走主线的玩家会稳定进入"被注意 / 被盯住"区间。
+    static let chapterOneClueExposureCost: Double = 6
+
+    /// 同一节课内连续深呼吸的耐受衰减。
+    ///
+    /// 第 1 次全额，之后迅速失效，直到进入下一个学习时段才重置。
+    /// 这是消除"写作业 / 深呼吸交替"无脑解的核心机制。
+    static let breatheToleranceMultipliers: [Double] = [1.0, 0.6, 0.3, 0.12]
+
+    private static func breatheMessage(relief: Double, hadTension: Bool) -> String {
+        if relief >= 0.95 {
+            return "你做了几次缓慢呼吸。问题还在，但身体先回到此刻。"
+        }
+        if relief >= 0.45 {
+            return "你做了几次缓慢呼吸，但肩膀本来就没那么紧，能放下的东西不多。"
+        }
+        return "你又试了一次深呼吸。同一节课里，身体已经不太回应这个动作了。"
+    }
+
+    /// 距离当前步骤可以推进还剩几个回合。0 表示现在就可以推进。
+    var chapterOneStepsUntilReady: Int {
+        guard activeChapter == .silentClassroom, chapterOneStep != .completed else { return 0 }
+        return max(0, chapterOneWaitRemaining)
+    }
+
+    /// 暴露的风险分级（P1 反馈层的唯一数据源）。
+    var exposureSignal: ExposureSignal {
+        ExposureSignal.level(for: player.exposure)
+    }
+
+    /// 写作业的能量代价：越写越累（-9/-11/-13/-15）。
+    ///
+    /// 见交接文档 4.4：固定代价会让"写作业"变成可无限重复的中性动作，
+    /// 递减曲线让它随晚自习推进越来越难维持。
+    var studyEnergyCost: Double {
+        switch currentTurn {
+        case ..<5: return 9
+        case ..<9: return 11
+        case ..<14: return 13
+        default: return 15
+        }
+    }
+
+    /// 每回合的自然消耗与恢复。
+    ///
+    /// 见交接文档 4.4。三件事同时发生：
+    /// 1. 基础回合恢复（人坐着不动也会缓一点，支持网络提高恢复速度）；
+    /// 2. 自然消耗与自然压力增长（人不会凭空平静）；
+    /// 3. **持续高暴露本身就是消耗**：呼吸变浅、注意力被风险吃掉。
+    ///    这是让"获取信息 → 暴露上升 → 能量下降"形成闭环的关键一环。
+    ///
+    /// 只在回合真正结束时调用一次，避免事件往返造成重复结算。
+    private func applyTurnAttrition() {
+        let fatigue = currentPeriod.fatigueMultiplier
+        player.psychicEnergy = min(100, player.psychicEnergy + 4 + player.support / 30)
+        player.psychicEnergy = max(0, player.psychicEnergy - 1.6 * fatigue)
+        player.stress = min(100, player.stress + 1.1 * fatigue)
+
+        if player.exposure > 45 {
+            let overload = player.exposure - 45
+            player.psychicEnergy = max(0, player.psychicEnergy - overload * 0.18)
+            player.stress = min(100, player.stress + overload * 0.04)
+        }
     }
 
     var chapterOneAvailableActions: [PlayerAction] {
@@ -1207,6 +1313,12 @@ final class GameManager: ObservableObject {
 
     private func beginStudentFreeRoam(duration: TimeInterval = 60, openingMessage: String? = nil) {
         guard activeRole.isTeacher == false else { return }
+        // 第一章是脚本化的垂直切片：它的主线依赖"坐在座位上转头"这一动作
+        // （`observe` + `cameraPose`），而自由活动期间 `setPose` 会被
+        // `freeRoam.isActive` 拦下，主线因此会永久卡死——这是实际发生过的
+        // 死锁（自动游玩跑到 inspectNote 就再也推进不了）。
+        // 关卡一的"课间"由它自己的节奏控制，不开放离座漫游。
+        guard activeChapter != .silentClassroom else { return }
         freeRoamTimer?.invalidate()
         freeRoamPausedAt = nil
         returnToSeatTask?.cancel()
@@ -1738,10 +1850,14 @@ final class GameManager: ObservableObject {
         case .study:
             spendAttention(for: .desk, multiplier: 0.8)
             player.homework += 12
-            player.psychicEnergy -= 11
+            // 写作业是"唯一能推进作业"的动作，但它的能量代价随时间递增：
+            // 越写越累（-9/-11/-13/-15），避免玩家把整晚压成同一个动作。
+            player.psychicEnergy -= studyEnergyCost
             player.maskCost += 4
-            player.stress += 5
-            player.exposure = max(0, player.exposure - 4)
+            player.stress += 4
+            // 低头写作业能让自己"看起来正常"，但抹掉的注意力热量有限：
+            // 曾经的 -4 足以让玩家用写作业把主线积累的暴露全部刷掉。
+            player.exposure = max(0, player.exposure - 1.5)
             message = "你写完了一小段题。进度变高了，注意力也明显被掏空。"
             addMonologue("我不是不想学，是注意力像被一点点磨掉。", intensity: 0.58)
             addAudioCue(.paper, direction: "桌面", intensity: 0.34, note: "笔尖划过纸面，声音很近。")
@@ -1760,40 +1876,73 @@ final class GameManager: ObservableObject {
             player.support += 10
             player.psychicEnergy -= 4
             player.maskCost += 7
-            player.exposure += settings.allowsWhispering ? 3 : (teacher.isNearPlayer ? 18 : 8)
-            message = "纸条被同桌接住。不是所有连接都需要大声说出来。"
+            player.exposure += settings.allowsWhispering ? 4 : (teacher.isNearPlayer ? 24 : 11)
+            message = teacher.isNearPlayer
+                ? "纸条刚推过去，老师的脚步就在过道里停了半拍。"
+                : "纸条被同桌接住。不是所有连接都需要大声说出来。"
             addMonologue("原来一句写在纸上的话，也能让我没那么孤单。", intensity: 0.45)
             improveDeskmates(delta: 9, stressRelief: 4)
             addAudioCue(.chair, direction: "桌边", intensity: 0.26, note: "你借着抽屉边缘遮住手势，隐蔽也会制造一点声音。")
             addAudioCue(.paper, direction: "左侧近处", intensity: 0.52, note: "纸张摩擦声提醒你：连接也有风险。")
         case .observe:
             spendAttention(for: cameraPose.visionZone, multiplier: 0.7)
-            player.psychicEnergy -= 4
-            player.stress = max(0, player.stress - 3)
-            player.exposure += 2
+            player.psychicEnergy -= 5
+            // 观察不再是"免费信息"：确认异常必须把头转出去，暴露因此上升，
+            // 而且看到的东西会留在脑子里，压力不会因为"看清楚了"而下降。
+            player.exposure += 6
+            player.stress += 1
             message = viewMode == .teacher ? teacherPerspective() : "你观察老师的移动节奏：鞋跟声、粉笔声、停顿，都变成了信息。"
             addMonologue("我一直在算风险，可是没人知道这也很累。", intensity: 0.52)
         case .talk:
             spendAttention(for: .leftPeripheral, multiplier: 1)
             player.support += 14
-            player.psychicEnergy += 5
+            player.psychicEnergy += 2
             player.maskCost = max(0, player.maskCost - 7)
-            player.exposure += settings.allowsWhispering ? 2 : (teacher.isNearPlayer ? 16 : 7)
+            player.exposure += settings.allowsWhispering ? 3 : (teacher.isNearPlayer ? 22 : 10)
+            // 老师就在旁边时，低声交流不只是"暴露上升"，而是真的会被记录一次。
+            if teacher.isNearPlayer && settings.allowsWhispering == false {
+                player.stress += 5
+            }
             player.helpedClassmate = true
-            message = "你低声问同桌还好吗。面具松了一点，关系也真实了一点。"
+            message = teacher.isNearPlayer
+                ? "你低声问同桌还好吗。她没抬头，但笔停了一下——她知道老师就在旁边。"
+                : "你低声问同桌还好吗。面具松了一点，关系也真实了一点。"
             addMonologue("声音很小，但它证明我不是一个人在这间教室里。", intensity: 0.38)
             improveDeskmates(delta: 16, stressRelief: 12)
             addAudioCue(.whisper, direction: "左侧近处", intensity: 0.44, note: "低语比文字更真实，也更容易被发现。")
         case .breathe:
             recoverAttention(18)
             // 深呼吸是"零风险恢复"入口，必须有代价，否则会压过所有其他动作。
-            // 代价：占用一整回合（作业停滞）＋ 略微推高暴露与压力回落幅度收窄。
-            player.psychicEnergy += 11
-            player.stress = max(0, player.stress - 10)
-            player.maskCost = max(0, player.maskCost - 3)
+            //
+            // 两道门槛：
+            // 1. 压力本来就不高时，身体没有东西可以释放，效果减半；
+            // 2. **同一节课内反复深呼吸会迅速失效**。这一条才是关键：
+            //    原来的"写作业 / 深呼吸"交替是无脑最优解，因为恢复没有次数上限
+            //    （交接文档 3.3 根因 A）。身体不是重置按钮，用得越密，
+            //    能放下的越少，玩家因此必须真的去安排节奏，而不是刷同一个动作。
+            let hasTensionToRelease = player.stress >= 30
+            // 跨时段自动重置。这里按 `currentPeriod` 判断而不是依赖
+            // `applyTimeProgression()`——关卡一并不会走那条路径。
+            if breatheUsesPeriod != currentPeriod {
+                breatheUsesPeriod = currentPeriod
+                breatheUsesThisPeriod = 0
+            }
+            let tolerance = GameManager.breatheToleranceMultipliers[
+                min(breatheUsesThisPeriod, GameManager.breatheToleranceMultipliers.count - 1)
+            ]
+            breatheUsesThisPeriod += 1
+            let relief = (hasTensionToRelease ? 1.0 : 0.5) * tolerance
+            player.psychicEnergy += 12 * relief
+            player.stress = max(0, player.stress - 11 * relief)
+            player.maskCost = max(0, player.maskCost - 3 * relief)
             player.exposure += 3
-            message = "你做了几次缓慢呼吸。问题还在，但身体先回到此刻。"
-            addMonologue("先把呼吸找回来，题目可以等一秒。", intensity: 0.3)
+            message = Self.breatheMessage(relief: relief, hadTension: hasTensionToRelease)
+            addMonologue(
+                relief >= 0.95
+                    ? "先把呼吸找回来，题目可以等一秒。"
+                    : (relief >= 0.45 ? "呼吸慢下来了，可真正压着我的事一件都没少。" : "我又试着深呼吸，但身体已经不买账了。"),
+                intensity: relief >= 0.95 ? 0.3 : 0.5
+            )
             addAudioCue(.heartbeat, direction: "颅内", intensity: 0.28, note: "心跳慢下来一点，听觉边界重新清晰。")
         case .window:
             spendAttention(for: .leftPeripheral, multiplier: 0.5)
@@ -2020,7 +2169,7 @@ final class GameManager: ObservableObject {
         currentPhase = .observation
         gameState = .playing
         resumeFreeRoamAfterEvent()
-        player.psychicEnergy = min(100, player.psychicEnergy + 4 + player.support / 30)
+        applyTurnAttrition()
         recoverAttention(20)
         player.maskCost += 2
         player.stress += player.maskCost > 80 ? 8 : 2
@@ -2028,7 +2177,12 @@ final class GameManager: ObservableObject {
         updateClassmates(after: nil)
         recordSnapshot(actionLabel: "事件后继续")
         updatePerception()
-        applyTimeProgression()
+        // 关卡一不走时段推进：它的节奏由主线步骤自己控制，而且它的
+        // teacherTurn 分支同样跳过这一步。事件往返时若在这里推进时段，
+        // 就会出现"只有触发过事件才会进入课间"的不一致行为。
+        if activeChapter != .silentClassroom {
+            applyTimeProgression()
+        }
         clampPlayer()
         maybeAddAnomalyMonologue()
         checkCriticalState()
@@ -2036,7 +2190,15 @@ final class GameManager: ObservableObject {
 
     private func teacherTurn() {
         currentPhase = .teacherTurn
-        let patrolStep = settings.patrolFrequency > 72 ? Int.random(in: 2...3) : Int.random(in: 1...2)
+        // 巡逻节奏由回合数与巡视频率决定，**不再是随机数**。
+        //
+        // 这个游戏的核心幻想是"靠鞋跟声、粉笔声和停顿去算老师在哪儿"。
+        // 随机步长会让"老师现在在哪"变成不可学习的噪音，玩家只能被动反应；
+        // 固定节拍则让位置变成可以预判、可以利用的信息，风险也才谈得上
+        // "可预判"（交接文档 4.2 的前提）。
+        let patrolStep = settings.patrolFrequency > 72
+            ? 1 + (currentTurn % 2)                     // 高巡视频率：1/2 步交替
+            : 1 + (currentTurn % 3 == 0 ? 1 : 0)        // 常规频率：每三步多走一步
         teacher.positionIndex = (teacher.positionIndex + patrolStep) % 8
         teacher.isNearPlayer = [2, 3, 4].contains(teacher.positionIndex)
         teacher.fatigue = min(100, teacher.fatigue + (1.4 + settings.patrolFrequency / 60) * currentPeriod.fatigueMultiplier)
@@ -2049,6 +2211,18 @@ final class GameManager: ObservableObject {
             if currentTurn < maxTurns { currentTurn += 1 }
             currentPhase = .observation
             updatePerception()
+            // 第一章原本在这里直接 return，导致"被发现 / 假巡视 / 后门观察"
+            // 三条教师压力分支在关卡一里完全不可达 —— 暴露这个核心机制
+            // 在主线上彻底失效（交接文档 3.3 根因 C）。
+            // 现在关卡一有自己的分级压力循环：暴露越高，前兆越明显，
+            // 越过阈值就会被真的看见。
+            if applyChapterOnePressure() {
+                // 事件路径：本回合的自然消耗交由 continueAfterEvent 结算，
+                // 避免同一次回合被结算两次。
+                clampPlayer()
+                return
+            }
+            applyTurnAttrition()
             clampPlayer()
             maybeAddAnomalyMonologue()
             // 第一章同样需要临界反馈：能量见底时给出"撑不住了"的出口，
@@ -2163,8 +2337,79 @@ final class GameManager: ObservableObject {
         return true
     }
 
-    private func shouldRearDoorObserve(pressure: Double, discoveryRisk: Double) -> Bool {
-        guard currentPeriod.isBreak == false, teacher.kpiPressure > 64, teacher.fatigue < 86 else {
+    /// 关卡一的分级压力循环。
+    ///
+    /// 返回值：true 表示本回合触发了"被看见"事件，调用方需要提前返回。
+    ///
+    /// 设计意图（交接文档 4.1 / 4.2）：
+    /// - 暴露在 30 / 50 / 70 三处给出**可感知的前兆**（文本 + 听觉 + 压力代价），
+    ///   玩家必须在被抓住之前就知道自己在冒险，而不是"18 → 100 突然爆掉"；
+    /// - 越过 70 之后老师会真的走过来，代价是压力、面具成本和一次记录，
+    ///   但**不打断主线**——垂直切片不该因为一次失误就卡死；
+    /// - 每次被发现都把暴露拉回安全区，形成"紧张—释放"的锯齿曲线，
+    ///   而不是一次爆掉就再无回头路。
+    ///
+    /// 关键：被抓住**不是概率事件**。越过 70 会先给一个缓冲回合
+    /// （"你被盯住了"），如果下一个回合仍然留在线上才会被看见。
+    /// 危险因此是可预判、可反应、可复盘的——玩家能在最后一刻决定
+    /// "是先收手，还是把这条线索看完"。掷骰子会让预警失去意义。
+    private func applyChapterOnePressure() -> Bool {
+        let signal = exposureSignal
+        if signal != .targeted { chapterOneTargetedTurns = 0 }
+
+        switch signal {
+        case .calm:
+            break
+        case .noticed:
+            player.stress += 1.5
+            addAudioCue(.paper, direction: "右前方", intensity: 0.3, note: "有人往你这边看了一眼，也可能只是翻页。")
+        case .watched:
+            player.stress += 3.5
+            addAudioCue(.footstep, direction: "右前方", intensity: 0.52, note: "老师的脚步比刚才慢了半拍。")
+            appendEvent(title: "视线", detail: "老师的巡视节奏变了，你被放进了观察范围。")
+        case .targeted:
+            player.stress += 6
+            player.maskCost += 2
+            if chapterOneTargetedTurns >= 1 {
+                chapterOneTargetedTurns = 0
+                triggerChapterOneDiscovery()
+                return true
+            }
+            // 缓冲回合：这一回合只是"被盯住"，玩家还有一次收手的机会。
+            chapterOneTargetedTurns += 1
+            addAudioCue(.heartbeat, direction: "颅内", intensity: 0.72, note: "你感觉被盯住了，后背发紧。下一步她就会走过来。")
+        }
+
+        return false
+    }
+
+    /// 关卡一的"被看见"事件。
+    ///
+    /// 它不是失败：玩家会付出现实代价（压力、面具成本、一次记录、节奏被打断），
+    /// 但主线仍然可以继续。这正是这个游戏想表达的东西——
+    /// 制度压力会留下痕迹，但被看见也可以是一次转折。
+    private func triggerChapterOneDiscovery() {
+        player.teacherWarnings += 1
+        teacher.studentsWarned += 1
+        player.exposure = 46
+        player.stress = min(100, player.stress + 14)
+        player.maskCost += 8
+        appendEvent(title: "被看见", detail: "老师在过道停住。她没有公开批评，但你的状态被记录了一次。")
+        presentEvent(
+            kind: .discovery,
+            title: "被看见",
+            body: "老师的脚步在过道里停住，没有点名，也没有提高声音。她看了你几秒，像在记录什么。最后只说了一句：先把状态稳住。那句话说的是纪律，听起来却更像担心。",
+            choices: [
+                EventChoice(id: "ch1_stop_and_breathe", title: "收手，先把呼吸压稳", detail: "暴露明显回落，但这一晚的节奏被打断"),
+                EventChoice(id: "ch1_admit_tired", title: "小声说自己也撑不住", detail: "把真实状态交出去，可能换来理解"),
+                EventChoice(id: "ch1_cover_up", title: "摆回普通学生的样子", detail: "风险过去，面具更重了一层")
+            ]
+        )
+        addAudioCue(.footstep, direction: "过道近处", intensity: 0.9, note: "脚步声停下，比批评更早抵达。")
+        audio.playWarning()
+    }
+
+    private func shouldRearDoorObserve(pressure: Double, discoveryRisk: Double) -> Bool {        guard currentPeriod.isBreak == false, teacher.kpiPressure > 64, teacher.fatigue < 86 else {
             return false
         }
         if teacher.positionIndex == 8 { return false }
@@ -2776,6 +3021,11 @@ final class GameManager: ObservableObject {
         let cryingLeft = classmates.contains { ($0.seat.row == 2 && $0.seat.column == 0) && $0.state == .crying }
         peripheralLeft = cameraPose == .left ? 0.1 : max(cryingLeft ? 0.75 : 0, Double.random(in: 0.1...0.45))
         peripheralRight = max(near, cameraPose == .right ? 0.12 : Double.random(in: 0.2...0.65))
+        // P1 反馈层：把暴露翻译成玩家能立刻理解的一句话。
+        // 这里是唯一写入口，保证"提示等级"和"真实风险"永远同步。
+        let signal = exposureSignal
+        dangerSignalLevel = signal
+        dangerSignalText = signal.detail
         audio.updateStress(energy: player.psychicEnergy, stress: player.stress, teacherNear: teacher.isNearPlayer, support: player.support, classroomNoise: classroomNoise)
         audio.updateAmbient(classroomNoise: classroomNoise, period: currentPeriod, lightLevel: classroomLightLevel, elapsedMinutes: elapsedMinutes)
     }
@@ -2832,6 +3082,8 @@ final class GameManager: ObservableObject {
         let period = currentPeriod
         guard triggeredPeriods.contains(period) == false else { return }
         triggeredPeriods.insert(period)
+        // 进入新的学习时段：深呼吸的耐受重新开始累积。
+        breatheUsesThisPeriod = 0
 
         switch period {
         case .breakOne, .breakTwo:
@@ -3518,6 +3770,29 @@ final class GameManager: ObservableObject {
             player.exposure = max(0, player.exposure - 4)
             addMonologue("我继续写题，但那两下声音还停在背后。", intensity: 0.56)
             message = "你继续写题，像什么都没听见。不确定感没有消失，只是被压进了笔尖声里。"
+        case "ch1_stop_and_breathe":
+            player.exposure = max(0, player.exposure - 20)
+            player.stress = max(0, player.stress - 6)
+            player.psychicEnergy = max(0, player.psychicEnergy - 4)
+            player.maskCost += 8
+            addMonologue("我停得很快。快到自己都分不清是听话，还是怕。", intensity: 0.58)
+            message = "你立刻收手，把视线放回作业。风险退了下去，但这一晚的节奏已经断过一次。"
+        case "ch1_admit_tired":
+            player.maskCost = max(0, player.maskCost - 12)
+            player.support += 8
+            player.stress = max(0, player.stress - 10)
+            teacher.empathy += 4
+            teacher.studentsHelped += 1
+            player.teacherCareMoments += 1
+            addMonologue("我把“我撑不住”说出口了。它没有让事情变糟。", intensity: 0.68)
+            message = "你小声说自己今晚状态很差。老师沉默了两秒，把声音压低：那你先别硬撑，我等下再过来。"
+        case "ch1_cover_up":
+            player.exposure = max(0, player.exposure - 8)
+            player.maskCost += 10
+            player.stress += 5
+            player.psychicEnergy = max(0, player.psychicEnergy - 3)
+            addMonologue("我摆回了标准姿势。外面看起来没事了，里面更沉了一点。", intensity: 0.72)
+            message = "你把背挺直，把表情收回去。老师走开了，而你把真实状态又压深了一层。"
         case "quiet_help_classmate":
             applyClassmateSupport(from: event, relationshipDelta: 18, stressRelief: 22)
             player.support += 12
@@ -3722,6 +3997,15 @@ final class GameManager: ObservableObject {
     private func collectChapterClue(for action: PlayerAction) {
         guard activeChapter == .silentClassroom, activeRole.isTeacher == false, hasPresentedChapterOneDecision == false else { return }
 
+        // 时机未到：动作照常产生耗损（暴露、能量、身体需求都会照算），
+        // 但线索不会提前出现。主线因此不再是一段 6 回合的情报冲刺，
+        // 而是一整晚里"等信号成熟"的过程。
+        if chapterOneWaitRemaining > 0 {
+            chapterOneWaitRemaining -= 1
+            message += " 外面还没有新的动静。信号得自己出现，催不来。"
+            return
+        }
+
         switch chapterOneStep {
         case .observeLinChe where action == .observe && cameraPose == .left:
             collectChapterClue(.linChePage, messageSuffix: "林澈的书停在同一页太久了，笔尖也没有动。")
@@ -3748,6 +4032,13 @@ final class GameManager: ObservableObject {
 
     private func advanceChapterOne(to step: ChapterOneStep, cue: String) {
         chapterOneStep = step
+        // 推进主线**本身就是风险动作**：要看见异常，就必须把视线停在别人身上、
+        // 把注意力从"普通学生"的表演里挪开。这条代价不能由玩家绕开，
+        // 否则"认真走主线"永远是安全路径（交接文档 3.1）。
+        player.exposure += GameManager.chapterOneClueExposureCost
+        // 下一步的等待回合数。等待期间玩家必须真的"过这个晚自习"，
+        // 见 `chapterOneWaitRemaining` 的说明。
+        chapterOneWaitRemaining = GameManager.chapterOneStepPacingTurns
         message = cue
     }
 

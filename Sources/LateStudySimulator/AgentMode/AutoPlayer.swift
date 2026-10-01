@@ -112,7 +112,10 @@ enum AutoPlayer {
 
         switch strategy {
         case .mainQuest:
-            return rotate(.mainQuest, over: ["写作业", "写作业", "深呼吸"])
+            // 等待信号成熟时，像普通玩家一样过晚自习：能量见底先恢复，
+            // 否则写作业推进进度。
+            if session.debugPlayerNeeds().energy < 40 { return "深呼吸" }
+            return rotate(.mainQuest, over: ["写作业", "写作业", "看窗外"])
         case .studyOnly:
             return "写作业"
         case .selfCare:
@@ -130,6 +133,11 @@ enum AutoPlayer {
         available: Set<String>,
         strategy: Strategy
     ) -> String? {
+        // 时机未到：线索催不来。这一回合应该真的去过晚自习，
+        // 而不是把动作浪费在被拒绝的划线动作上——那既不像玩家，
+        // 也会让 --auto-all 的数值对比失去意义。
+        guard session.debugChapterWaitRemaining() == 0 else { return nil }
+
         switch session.debugStepDescription() {
         case "observeLinChe":
             return rotate(strategy, over: ["look left", "观察"])

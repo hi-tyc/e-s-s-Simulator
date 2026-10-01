@@ -911,6 +911,7 @@ struct ContentView: View {
 
     private var studentDynamicMeters: some View {
         VStack(spacing: 8) {
+            dangerSignalRow
             meter("心理能量", value: game.player.psychicEnergy, color: .green)
             meter("视觉注意力", value: game.player.visualAttention, color: .mint)
             meter("面具成本", value: game.player.maskCost, color: .purple)
@@ -940,8 +941,54 @@ struct ContentView: View {
         }
     }
 
-    private func teacherCounterRow(_ title: String, value: Int, tint: Color) -> some View {
-        HStack {
+    /// 危险前兆（P1 反馈层）。
+    ///
+    /// 暴露原本只是一个数字，玩家必须在被抓住之前*感觉到*自己在冒险。
+    /// 这里把 `ExposureSignal` 翻译成一句第一人称感受 + 颜色强度：
+    /// 安静时几乎不打扰，被盯住时整行变红，形成可读的预警梯度。
+    private var dangerSignalRow: some View {
+        let signal = game.dangerSignalLevel
+        let tint: Color
+        let icon: String
+        switch signal {
+        case .calm:
+            tint = .white.opacity(0.42)
+            icon = "leaf.fill"
+        case .noticed:
+            tint = .yellow.opacity(0.9)
+            icon = "eye.fill"
+        case .watched:
+            tint = .orange
+            icon = "exclamationmark.triangle.fill"
+        case .targeted:
+            tint = .red
+            icon = "exclamationmark.octagon.fill"
+        }
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .bold))
+                Text("风险 · \(signal.title)")
+                    .font(.system(size: 10, weight: .bold))
+                Spacer()
+                if game.player.teacherWarnings > 0 {
+                    Text("已被记录 \(game.player.teacherWarnings)")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            Text(game.dangerSignalText)
+                .font(.system(size: 9))
+                .foregroundStyle(.white.opacity(0.72))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(tint)
+        .padding(6)
+        .background(tint.opacity(signal == .calm ? 0.06 : 0.14), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func teacherCounterRow(_ title: String, value: Int, tint: Color) -> some View {        HStack {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
             Spacer()

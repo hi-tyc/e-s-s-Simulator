@@ -135,6 +135,9 @@ final class AgentGameSession {
         lines.append("  精力：\(describe(p.psychicEnergy, thresholds: (80, 55, 30)))")
         lines.append("  压力：\(describeInverted(p.stress, thresholds: (30, 55, 75)))")
         lines.append("  被注意的程度：\(describeInverted(p.exposure, thresholds: (25, 50, 75)))")
+        // 危险前兆必须和 GUI 一样可感知：P1 反馈层存在的意义就是
+        // "在被抓住之前知道自己在冒险"，agent 模式看不到这一层就没法验证它。
+        lines.append("  风险前兆：\(game.dangerSignalLevel.title) —— \(game.dangerSignalText)")
         lines.append("  维持形象的疲惫：\(describeInverted(p.maskCost, thresholds: (30, 55, 75)))")
         lines.append("  身边人的支持：\(describe(p.support, thresholds: (30, 55, 75)))")
         lines.append("  注意力：\(describe(p.visualAttention, thresholds: (75, 45, 20)))")
@@ -498,6 +501,14 @@ final class AgentGameSession {
     /// 当前主线步骤的字符串描述（供自动玩家判断）。
     func debugStepDescription() -> String {
         String(describing: game.chapterOneStep)
+    }
+
+    /// 主线步骤还要等几个回合才能推进（0 表示现在就可以）。
+    ///
+    /// 自动玩家用它判断"这一回合该不该催线索"：时机未到时应该去过晚自习
+    /// （写作业 / 自我照顾），而不是反复点同一个动作把回合浪费掉。
+    func debugChapterWaitRemaining() -> Int {
+        game.chapterOneStepsUntilReady
     }
 
     /// 玩家身体需求（供自动玩家决策）。

@@ -3,6 +3,23 @@ import XCTest
 
 @MainActor
 final class MovementAndEventTests: XCTestCase {
+    /// 把时间推进到"当前主线步骤已成熟"。
+    ///
+    /// 第一章现在有节奏门槛：每步线索之间要等信号成熟（`chapterOneStepReadyTurn`）。
+    /// 测试直接把回合推过去，这样节奏参数调整时，测试仍然只验证"顺序正确"。
+    private func matureChapterOneStep(_ game: GameManager) {
+        var safety = 0
+        while game.chapterOneStepsUntilReady > 0 && safety < 30 {
+            // 等待回合必须由真实行动消耗掉（倒计时挂在 collectChapterClue 上）。
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+            } else {
+                game.execute(.study)
+            }
+            safety += 1
+        }
+    }
+
     func testInitialGameGuideLocksEntryThenBecomesFreelyReopenable() {
         let game = GameManager()
         game.beginInitialGameGuideIfNeeded()
@@ -438,17 +455,21 @@ final class MovementAndEventTests: XCTestCase {
         XCTAssertEqual(game.chapterOneStep, .locateHiddenSound)
         XCTAssertEqual(game.chapterClues.map(\.id), [.linChePage])
 
+        matureChapterOneStep(game)
         game.setPose(.right)
         game.execute(.observe)
         XCTAssertEqual(game.chapterOneStep, .regulateSelf)
         XCTAssertEqual(game.chapterClues.map(\.id), [.linChePage, .hiddenCrying])
 
+        matureChapterOneStep(game)
         game.execute(.breathe)
         XCTAssertEqual(game.chapterOneStep, .approachLinChe)
 
+        matureChapterOneStep(game)
         game.execute(.talk)
         XCTAssertEqual(game.chapterOneStep, .inspectNote)
 
+        matureChapterOneStep(game)
         game.setPose(.desk)
         game.execute(.observe)
         XCTAssertEqual(game.chapterOneStep, .followLinChe)

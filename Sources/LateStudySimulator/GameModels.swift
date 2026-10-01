@@ -491,6 +491,60 @@ struct PlayerState {
     }
 }
 
+/// 暴露的风险分级。
+///
+/// 设计意图（见交接文档 4.2）：暴露不能只是一个数字。玩家必须在**被抓住之前**
+/// 就感到自己在冒险，因此把暴露切成四段，每段都有对应的环境提示、
+/// 听觉前兆和压力代价。数值区间刻意与 `player.exposure` 直接绑定，
+/// 保证"看到什么提示"和"处在什么风险"永远一致。
+enum ExposureSignal: Int, CaseIterable, Comparable {
+    /// 暴露 < 30：教室很安静，没有任何人注意你。
+    case calm = 0
+    /// 暴露 30-50：有人瞥了你一眼，可能只是翻页。
+    case noticed = 1
+    /// 暴露 50-70：老师的巡视节奏变了，你被放进了观察范围。
+    case watched = 2
+    /// 暴露 >= 70：你被盯住了，下一步就是走过来。
+    case targeted = 3
+
+    static func < (lhs: ExposureSignal, rhs: ExposureSignal) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    /// 由暴露值推导分级。阈值集中在这里，避免散落在各处。
+    static func level(for exposure: Double) -> ExposureSignal {
+        switch exposure {
+        case ..<30: return .calm
+        case ..<50: return .noticed
+        case ..<70: return .watched
+        default: return .targeted
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .calm: return "安静"
+        case .noticed: return "被瞥见"
+        case .watched: return "被注意"
+        case .targeted: return "被盯住"
+        }
+    }
+
+    /// 玩家可读的感受文案。第一人称，与游戏整体叙事语气保持一致。
+    var detail: String {
+        switch self {
+        case .calm:
+            return "教室很安静，笔尖声清晰。"
+        case .noticed:
+            return "有人往你这边看了一眼，也可能只是翻页。"
+        case .watched:
+            return "老师的脚步变慢了，你被放进了巡视范围。"
+        case .targeted:
+            return "你感觉被盯住了，后背发紧。下一步她就会走过来。"
+        }
+    }
+}
+
 struct StudentFreeRoamState {
     var isActive: Bool = false
     var positionX: Double = -0.6

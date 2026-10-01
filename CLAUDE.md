@@ -18,8 +18,10 @@ swift run LateStudySimulator   # 构建并运行
 关键约束:
 - 目标平台声明为 `.macOS(.v26)`,依赖 SwiftUI 官方 Liquid Glass API(`glassEffect`、玻璃按钮样式)。必须在支持 Liquid Glass 的 SDK/运行环境下构建,否则会编译或运行失败。
 - 设计假设环境只有 Command Line Tools,因此用 `swift build`/`swift run` 而非 `xcodebuild`。
-- **当前工作机是 Windows**,PATH 中没有 `swift`,无法在此环境直接构建。任何构建/运行验证需要在 macOS 上进行——在此环境下修改代码后无法本地验证编译,需明确告知用户。
-- 目前没有 `Tests/` 目录,也没有测试框架。
+- **当前开发机是 macOS(Apple Silicon),`swift build` / `swift test` 可以直接跑**(已在 Swift 6.4 / macOS 27.2 上验证)。改完之后请实际构建并跑测试,不要靠推测。
+- 若在**没有 swift 的环境**(例如 Windows)工作,则无法本地验证编译,必须明确告知用户。
+- 测试都在 `Tests/LateStudySimulatorTests/`(40 XCTest + 33 swift-testing)。
+- 验证数值改动请用 Agent 模式:`swift test --filter PlaythroughProbe` 看逐回合数值表;`swift run LateStudySimulator --agent --auto-all` 看五种策略的结局分布。注意:五种策略的结局分布 + 探针数值表是数值平衡的主要验收手段。
 
 ## 架构
 
