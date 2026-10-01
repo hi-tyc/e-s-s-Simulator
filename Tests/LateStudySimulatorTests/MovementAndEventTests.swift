@@ -479,8 +479,19 @@ final class MovementAndEventTests: XCTestCase {
         XCTAssertTrue(game.chapterOneAvailableActions.contains(.window))
         XCTAssertTrue(game.chapterOneAvailableActions.contains(.leaveSeat))
 
-        game.execute(.leaveSeat)
-        XCTAssertEqual(game.chapterOneStep, .completed)
+        // 这条用例一路猛点观察/倾听，暴露已经很高；被盯住时起身会被看见，
+        // 而被看见之后还可能跟着别的事件（例如压力见顶）。
+        // 真实玩家也是一件一件处理完，再继续举手——所以这里循环到真的离场。
+        var leaveAttempts = 0
+        while game.chapterOneStep != .completed && leaveAttempts < 12 {
+            leaveAttempts += 1
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+                continue
+            }
+            game.execute(.leaveSeat)
+        }
+        XCTAssertEqual(game.chapterOneStep, .completed, "付过代价之后必须仍然能离场")
         XCTAssertEqual(game.chapterOneDecision, "跟随林澈进入走廊")
         // 跟上林澈后不再立即结算：先播放章节转场，再由玩家阅读纸条
         // 并做出最终决策（交给老师 / 找班干部 / 明天再说 / 走廊等待）。

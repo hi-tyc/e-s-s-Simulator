@@ -1481,6 +1481,22 @@ final class GameManager: ObservableObject {
         clampPlayer()
     }
 
+    /// 观察的代价。
+    ///
+    /// **两条路径都必须付**：显式点「观察」，和"盯住看满 2.5 秒"。
+    /// 后者是 GUI 里最自然的玩法（鼠标就是主界面），如果它免费，
+    /// 那"转头有成本"和暴露带来的紧张感在真实游玩里就被绕过去了——
+    /// agent 模式测出来的暴露曲线会明显高于玩家实际体验的东西。
+    ///
+    /// 观察不再是"免费信息"：确认异常必须把头转出去，暴露因此上升，
+    /// 而且看到的东西会留在脑子里，压力不会因为"看清楚了"而下降。
+    private func applyObservationCost() {
+        spendAttention(for: cameraPose.visionZone, multiplier: 0.7)
+        player.psychicEnergy = max(0, player.psychicEnergy - 5)
+        player.exposure += 6
+        player.stress += 1
+    }
+
     func updateChapterLookDwell(delta: TimeInterval) {
         // 允许在自由活动期间继续累积观察进度：课间会自动进入 5 分钟自由活动，
         // 若此处强制要求 freeRoam 未激活，主线在课间会完全无法推进，玩家会以为卡死。
@@ -1509,6 +1525,8 @@ final class GameManager: ObservableObject {
             if chapterLookDwell >= 2.5 {
                 chapterLookDwell = 0
                 chapterLookDwellPose = nil
+                // 与显式点「观察」同一代价：盯住看也是在看，也在冒险。
+                applyObservationCost()
                 collectChapterClue(for: .observe)
             }
         } else {
@@ -2060,6 +2078,14 @@ final class GameManager: ObservableObject {
         }
 
         if chapterOneStep == .followLinChe, action == .leaveSeat {
+            // 站起来是全晚最显眼的动作。已经被盯上时，这一步**不能是免疫区**：
+            // 原来的实现直接 completeChapterOne()，于是玩家可以带着 90+ 暴露
+            // 从容离场，"被看见"这套机制恰好在最关键的一刻失效
+            // （实测：GUI 路径暴露到 72，却一次都没被抓到，能量也没掉下来）。
+            if player.exposure >= 70 {
+                triggerChapterOneDiscovery()
+                return
+            }
             completeChapterOne()
             return
         }
@@ -2112,12 +2138,7 @@ final class GameManager: ObservableObject {
             addAudioCue(.chair, direction: "桌边", intensity: 0.26, note: "你借着抽屉边缘遮住手势，隐蔽也会制造一点声音。")
             addAudioCue(.paper, direction: "左侧近处", intensity: 0.52, note: "纸张摩擦声提醒你：连接也有风险。")
         case .observe:
-            spendAttention(for: cameraPose.visionZone, multiplier: 0.7)
-            player.psychicEnergy -= 5
-            // 观察不再是"免费信息"：确认异常必须把头转出去，暴露因此上升，
-            // 而且看到的东西会留在脑子里，压力不会因为"看清楚了"而下降。
-            player.exposure += 6
-            player.stress += 1
+            applyObservationCost()
             message = viewMode == .teacher ? teacherPerspective() : "你观察老师的移动节奏：鞋跟声、粉笔声、停顿，都变成了信息。"
             addMonologue("我一直在算风险，可是没人知道这也很累。", intensity: 0.52)
         case .listen:

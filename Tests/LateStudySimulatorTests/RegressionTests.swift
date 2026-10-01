@@ -614,6 +614,320 @@ struct RegressionTests {
         #expect(titles.count == 8, "四条决策各自应有听清/没听清两种写法，实际 \(titles.count)：\(titles)")
     }
 
+    /// 最后一步不该是免疫区。
+    ///
+    /// 原来的实现在 `.followLinChe` 直接 `completeChapterOne()`，于是
+    /// 玩家能带着 90+ 暴露从容离场——"被看见"这套机制恰好在最关键的一刻失效。
+    /// 实测正是这个漏洞让 GUI 路径的能量永远不会掉到 35 以下。
+    @Test func leavingYourSeatWhileTargetedIsNotAFreeExit() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        var safety = 0
+        while game.chapterOneStep != .followLinChe && safety < 80 {
+            safety += 1
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+                continue
+            }
+            if game.chapterOneStepsUntilReady > 0 { game.execute(.study); continue }
+            switch game.chapterOneStep {
+            case .observeLinChe: game.setPose(.left); game.execute(.observe)
+            case .locateHiddenSound: game.setPose(.right); game.execute(.listen)
+            case .regulateSelf: game.execute(.breathe)
+            case .approachLinChe: game.execute(.talk)
+            case .inspectNote: game.setPose(.desk); game.execute(.observe)
+            default: break
+            }
+        }
+        #expect(game.chapterOneStep == .followLinChe, "应当能走到最后一步")
+        #expect(game.player.exposure >= 70, "前提：此时暴露已经很高，实际 \(game.player.exposure)")
+
+        game.execute(.leaveSeat)
+        #expect(game.chapterOneStep == .followLinChe, "被盯住时起身不该直接通关")
+        guard case .event(let caught) = game.gameState else {
+            Issue.record("被盯住时起身必须触发“被看见”")
+            return
+        }
+        #expect(caught.choices.count == 3, "“被看见”应当给三个应对方式")
+
+        // 付过代价之后必须仍然能走完，不允许变成新的死锁。
+        var attempts = 0
+        while game.chapterOneStep != .completed && attempts < 12 {
+            attempts += 1
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+                continue
+            }
+            game.execute(.leaveSeat)
+        }
+        #expect(game.chapterOneStep == .completed, "被看见之后必须仍然能离场")
+        #expect(game.player.teacherWarnings >= 1, "这次“被看见”必须留下记录")
+    }
+
+    // MARK: - GUI 路径（agent 模式覆盖不到）
+
+    /// 用 GUI 的方式走主线（视觉线索靠"盯住看"，而不是点按钮），
+    /// 并把 §9.1 的同一条验收标准也压在它上面。
+    ///
+    /// 意义：我之前的验收数据全部来自 agent 模式（只能用显式动作）。
+    /// 玩家在 GUI 里最自然的玩法是鼠标盯着目标——如果那条路的代价更轻，
+    /// 那"主线很紧张"这个结论对真实玩家就不成立。
+    @Test func guiStyleMainQuestAlsoCarriesRealRisk() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+        game.player.posture = .seated
+
+        var minEnergy = game.player.psychicEnergy
+        var maxExposure = game.player.exposure
+        var guardCount = 0
+
+        while guardCount < 40 {
+            guardCount += 1
+            if game.isChapterOneTransitionPresented { game.enterChapterTwo() }
+            if game.isChapterOnePaperPresented { game.dismissChapterOnePaper() }
+            if case .ending = game.gameState { break }
+
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+            } else if game.chapterOneStep == .completed {
+                break
+            } else if game.chapterOneStepsUntilReady > 0 {
+                game.execute(game.player.psychicEnergy < 45 ? .breathe : .study)
+            } else {
+                switch game.chapterOneStep {
+                case .observeLinChe:
+                    game.setPose(.left)
+                    for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+                case .locateHiddenSound:
+                    game.setPose(.right)
+                    game.execute(.listen)
+                case .regulateSelf:
+                    game.execute(.breathe)
+                case .approachLinChe:
+                    game.execute(.talk)
+                case .inspectNote:
+                    game.setPose(.desk)
+                    for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+                case .followLinChe, .completed:
+                    game.execute(.leaveSeat)
+                }
+            }
+
+            minEnergy = min(minEnergy, game.player.psychicEnergy)
+            maxExposure = max(maxExposure, game.player.exposure)
+        }
+
+        #expect(game.chapterOneStep == .completed, "GUI 路径也必须能走完主线")
+        #expect(maxExposure >= 60, "GUI 路径的暴露也应达到 60，实际 \(maxExposure)")
+        #expect(minEnergy < 35, "GUI 路径的能量也应至少一次低于 35，实际 \(minEnergy)")
+    }
+
+
+    /// GUI 里视觉线索靠"盯住看满 2.5 秒"推进（`updateChapterLookDwell`，由 3D 视图
+    /// 的 60fps tick 驱动）。agent 模式没有 3D 视图，所以自动游玩只覆盖了显式
+    /// `观察` 那一条路——这条测试补上真实游玩时最常用的那条。
+    @Test func visualCluesAdvanceByHoldingYourGazeButAudioDoesNot() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+        game.player.posture = .seated
+
+        // 步骤 1（视觉）：盯着林澈的方向看满 2.5 秒
+        game.setPose(.left)
+        for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+        #expect(game.chapterOneStep == .locateHiddenSound, "盯住看应当能收下视觉线索")
+
+        // 步骤 2（听觉）：盯多久都不该推进——它不是视觉线索
+        matureChapterOneStep(game)
+        game.setPose(.right)
+        for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+        #expect(game.chapterOneStep == .locateHiddenSound, "那道鼻息只能靠听，盯住看不应有效")
+
+        // 换成倾听就能推进
+        game.setPose(.right)
+        game.execute(.listen)
+        #expect(game.chapterOneStep == .regulateSelf)
+
+        // 步骤 3、4
+        matureChapterOneStep(game)
+        game.execute(.breathe)
+        matureChapterOneStep(game)
+        game.execute(.talk)
+        #expect(game.chapterOneStep == .inspectNote)
+
+        // 步骤 5（视觉）：低头盯着桌面
+        matureChapterOneStep(game)
+        game.setPose(.desk)
+        for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+        #expect(game.chapterOneStep == .followLinChe, "盯住桌面应当能收下纸条线索")
+    }
+
+    /// 盯住看必须和点「观察」付一样的代价。
+    ///
+    /// 否则 GUI 玩家（用鼠标盯着目标是最自然的玩法）能免费拿到所有视觉线索，
+    /// 而 agent 模式测出来的暴露曲线会明显高于玩家实际体验。
+    @Test func holdingYourGazeCostsTheSameAsObserving() {
+        func exposureAfterFirstClue(useGaze: Bool) -> Double {
+            let (game, _) = makeIsolatedGame()
+            game.startGame()
+            game.dismissChapterOneGuide()
+            game.player.posture = .seated
+            let before = game.player.exposure
+            if useGaze {
+                game.setPose(.left)
+                for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+            } else {
+                game.setPose(.left)
+                game.execute(.observe)
+            }
+            #expect(game.chapterOneStep == .locateHiddenSound)
+            return game.player.exposure - before
+        }
+
+        let gaze = exposureAfterFirstClue(useGaze: true)
+        let button = exposureAfterFirstClue(useGaze: false)
+        #expect(gaze > 0, "盯住看不该是免费的")
+        #expect(abs(gaze - button) < 0.001, "两条路径的代价必须一致：盯住 \(gaze) vs 按键 \(button)")
+    }
+
+    // MARK: - 完整游玩（端到端）
+
+    /// 结局必须是一个"能给人看的结局"，不能缺字段。
+    private func expectEndingIsComplete(_ ending: Ending, _ label: String) {
+        #expect(ending.title.isEmpty == false, "\(label)：结局缺标题")
+        #expect(ending.body.isEmpty == false, "\(label)：结局缺正文")
+        #expect(ending.reflection.isEmpty == false, "\(label)：结局缺反思")
+        #expect(ending.story.title.isEmpty == false, "\(label)：结局缺复盘标题")
+        #expect(ending.story.body.isEmpty == false, "\(label)：结局缺复盘正文")
+        #expect(ending.story.prompt.isEmpty == false, "\(label)：结局缺可以继续想的问题")
+        #expect(ending.empathyReflections.count == 3, "\(label)：三方同理心视角必须齐全")
+        #expect(ending.analysis.isEmpty == false, "\(label)：结局缺数据分析")
+        #expect(ending.comparisons.isEmpty == false, "\(label)：结局缺对照")
+        #expect(ending.resources.isEmpty == false, "\(label)：结局必须带上心理支持资源")
+    }
+
+    /// **端到端完整游玩**：菜单 → 序章 → 关卡一 → 章节转场 → 纸条 → 最终决策 → 结局。
+    ///
+    /// 为什么要单独写：agent 模式是直接 `startGame()` 开局的，**会跳过序章**，
+    /// 所以那五条自动策略验证不到"从菜单进入"这段真实流程。
+    @Test func fullPlaythroughFromMenuToEnding() {
+        let (game, _) = makeIsolatedGame()
+        game.startExperience(forcePrologue: true)
+        #expect(game.isPrologueActive, "从菜单进入必须先走序章")
+
+        var steps = 0
+        for beat in PrologueBeatID.allCases where game.isPrologueActive {
+            game.completePrologueBeat(beat, source: .player)
+            steps += 1
+        }
+        #expect(game.isPrologueActive == false, "序章必须能自己走完（走了 \(steps) 步）")
+        #expect(steps == PrologueBeatID.allCases.count, "每个序章 beat 都应正好走一次")
+        #expect(game.isChapterOneTransitionPresented, "序章结束后应进入章节转场")
+
+        // 序章 → 关卡一的交接
+        game.dismissChapterOneGuide()
+        game.enterChapterOneAfterPrologue()
+        #expect(game.chapterOneStep == .observeLinChe)
+        #expect(game.isChapterOneTransitionPresented == false)
+
+        // 关卡一：走主线（内部会处理章节转场 / 纸条 / 最终决策）
+        let run = runMainQuestPath(game)
+        #expect(game.chapterOneStep == .completed, "关卡一必须能走完")
+        #expect(run.turns >= 10, "主线应铺满整晚，实际 \(run.turns) 回合")
+
+        guard case .ending(let ending) = game.gameState else {
+            Issue.record("完整游玩必须到达结局，当前状态：\(game.gameState)")
+            return
+        }
+        expectEndingIsComplete(ending, "端到端")
+    }
+
+    /// 玩家始终不肯用「倾听」时，这一晚也必须能收尾。
+    ///
+    /// 这是"不允许存在无限拖下去的状态"的守卫：如果有一天改动让
+    /// 主线卡在某个步骤且没有其他出口，这条测试会立刻抓到。
+    @Test func playthroughTerminatesEvenIfThePlayerNeverListens() {
+        let (game, _) = makeIsolatedGame()
+        game.startGame()
+        game.dismissChapterOneGuide()
+
+        var actions = 0
+        while actions < 400 {
+            if case .ending = game.gameState { break }
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+            } else if case .playing = game.gameState {
+                game.execute(.study)
+            } else {
+                break
+            }
+            actions += 1
+        }
+
+        guard case .ending = game.gameState else {
+            Issue.record("从不倾听也必须能以某种方式结束这一晚，实际 \(actions) 次行动后仍未结束")
+            return
+        }
+        #expect(game.chapterOneStep != .completed, "从不倾听不该走完主线")
+        // 收尾方式必须是可解释的三种崩溃之一，而不是一个无名的状态。
+        #expect(game.chapterOneCollapse != nil || game.hasPresentedChapterOneDecision)
+    }
+
+    /// 五种自动策略都必须走到结局。
+    ///
+    /// 历史上出现过两次主线永久卡死（节奏期限永不满足 / 自由活动锁住视角），
+    /// 两次都会在这里暴露。`--auto-all` 是人工检查，这条是自动化守卫。
+    @Test func everyAutoStrategyReachesAnEnding() {
+        for strategy in AutoPlayer.Strategy.allCases {
+            for attempt in 1...2 {
+                let session = AgentGameSession(omniscient: false)
+                _ = AutoPlayer.play(session: session, strategy: strategy, verbose: false)
+                #expect(session.isFinished,
+                        "策略 \(strategy.rawValue) 第 \(attempt) 次没能走到结局")
+            }
+        }
+    }
+
+    /// 第一章的 11 种结局都必须完整可读。
+    @Test func everyChapterOneEndingIsComplete() {
+        var titles: Set<String> = []
+
+        for id in ["chapter1_teacher", "chapter1_monitor", "chapter1_tomorrow", "chapter1_wait"] {
+            for informed in [false, true] {
+                let (game, _) = makeIsolatedGame()
+                game.startGame()
+                if informed {
+                    for clue in [ChapterClueID.teacherSigh, .monitorOverload, .hiddenCrying, .linChePage, .unsignedNote] {
+                        addClue(game, clue)
+                    }
+                }
+                let choices = decisionChoices(game)
+                guard let choice = choices.first(where: { $0.id == id }) else {
+                    Issue.record("决策 \(id) 不见了")
+                    continue
+                }
+                game.resolveEventChoice(choice)
+                let ending = game.calculateEnding()
+                titles.insert(ending.title)
+                expectEndingIsComplete(ending, "\(id) informed=\(informed)")
+            }
+        }
+
+        for collapse in ChapterOneCollapse.allCases {
+            let (game, _) = makeIsolatedGame()
+            game.startGame()
+            game.chapterOneCollapse = collapse
+            let ending = game.calculateEnding()
+            titles.insert(ending.title)
+            expectEndingIsComplete(ending, "collapse=\(collapse.rawValue)")
+        }
+
+        #expect(titles.count == 11, "第一章应有 11 种结局写法，实际 \(titles.count)：\(titles)")
+    }
+
     // MARK: - 可玩性验收（交接文档 §9.1）
 
     /// 按主线推进，并像真实玩家一样用等待回合"过晚自习"。

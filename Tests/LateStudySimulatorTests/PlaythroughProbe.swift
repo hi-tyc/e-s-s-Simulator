@@ -213,6 +213,71 @@ struct PlaythroughProbe {
         }
     }
 
+    /// 策略 F：GUI 路径。
+    ///
+    /// 视觉线索靠"盯住看满 2.5 秒"（`updateChapterLookDwell`，由 3D 视图的
+    /// 60fps tick 驱动），听觉线索靠「倾听」。这是玩家在真实界面里
+    /// 最自然的玩法，也是 agent 模式**测不到**的那条路。
+    @Test func strategyF_guiStylePath() {
+        let game = makeGame()
+        header("策略 F：GUI 路径（视觉靠盯住看，听觉靠倾听）")
+        print(pad("回合", 5) + pad("步骤", 19) + pad("能量", 7) + pad("压力", 7)
+              + pad("暴露", 7) + pad("面具", 7) + pad("游戏内回合", 11))
+
+        var minEnergy = game.player.psychicEnergy
+        var maxExposure = game.player.exposure
+        var iterations = 0
+        game.player.posture = .seated
+
+        while iterations < 40 {
+            iterations += 1
+            if game.isChapterOneTransitionPresented { game.enterChapterTwo() }
+            if game.isChapterOnePaperPresented { game.dismissChapterOnePaper() }
+            if case .ending = game.gameState { break }
+
+            if case .event(let event) = game.gameState {
+                game.resolveEventChoice(event.choices[0])
+            } else if game.chapterOneStep == .completed {
+                break
+            } else if game.chapterOneStepsUntilReady > 0 {
+                game.execute(game.player.psychicEnergy < 45 ? .breathe : .study)
+            } else {
+                switch game.chapterOneStep {
+                case .observeLinChe:
+                    game.setPose(.left)
+                    for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+                case .locateHiddenSound:
+                    game.setPose(.right)
+                    game.execute(.listen)
+                case .regulateSelf:
+                    game.execute(.breathe)
+                case .approachLinChe:
+                    game.execute(.talk)
+                case .inspectNote:
+                    game.setPose(.desk)
+                    for _ in 0..<80 { game.updateChapterLookDwell(delta: 0.05) }
+                case .followLinChe, .completed:
+                    game.execute(.leaveSeat)
+                }
+            }
+
+            let p = game.player
+            minEnergy = min(minEnergy, p.psychicEnergy)
+            maxExposure = max(maxExposure, p.exposure)
+            let row = pad("I\(iterations)", 5) + pad("\(game.chapterOneStep)", 19)
+                + pad(String(format: "%.0f", p.psychicEnergy), 7)
+                + pad(String(format: "%.0f", p.stress), 7)
+                + pad(String(format: "%.0f", p.exposure), 7)
+                + pad(String(format: "%.0f", p.maskCost), 7)
+                + "\(game.currentTurn)"
+            print(row)
+        }
+
+        print(String(format: "  → 迭代 %d 次｜游戏内回合 %d｜能量最低 %.0f｜暴露最高 %.0f",
+                     iterations, game.currentTurn, minEnergy, maxExposure))
+        print("  → 结局：\(game.calculateEnding().title)")
+    }
+
     private func recordProbeRow(_ game: GameManager, turn: Int, step: String, waiting: Int) {
         let p = game.player
         let row = pad("T\(turn)", 5) + pad(step, 19)

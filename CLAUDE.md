@@ -20,8 +20,10 @@ swift run LateStudySimulator   # 构建并运行
 - 设计假设环境只有 Command Line Tools,因此用 `swift build`/`swift run` 而非 `xcodebuild`。
 - **当前开发机是 macOS(Apple Silicon),`swift build` / `swift test` 可以直接跑**(已在 Swift 6.4 / macOS 27.2 上验证)。改完之后请实际构建并跑测试,不要靠推测。
 - 若在**没有 swift 的环境**(例如 Windows)工作,则无法本地验证编译,必须明确告知用户。
-- 测试都在 `Tests/LateStudySimulatorTests/`(40 XCTest + 42 swift-testing)。
+- 测试都在 `Tests/LateStudySimulatorTests/`(40 XCTest + 51 swift-testing)。
 - 验证数值改动请用 Agent 模式:`swift test --filter PlaythroughProbe` 看逐回合数值表;`swift run LateStudySimulator --agent --auto-all` 看五种策略的结局分布。注意:五种策略的结局分布 + 探针数值表是数值平衡的主要验收手段。
+- **验收要压在玩家真实走的那条路上**:GUI 里视觉线索有两条路——按键 `观察`,和鼠标"盯住看满 2.5 秒"(`updateChapterLookDwell`,由 3D 视图 60fps tick 驱动)。agent 模式只能用前者,而且**跳过序章**(`AgentGameSession.init` 直接 `startGame()`)。任何"手感/紧张感"的结论都要问一句"玩家是按键还是用鼠标"。两条路的代价由 `applyObservationCost()` 统一,不要只改一条。
+- 凡是在流程末尾"提前 return 结束"的地方(例如 `followLinChe` + `leaveSeat`),都要检查**这一步之前该发生的判定有没有被跳过**——`completeChapterOne()` 曾经就是这样让整个关卡一的压力管线在最后一步静默失效的。
 - 视觉设计约定:**任务提示只写意图与通道,不写方位与按键**。方位信息属于音频声像与视觉余光,写进提示就等于把"自己搜索"退回成"照抄答案"。有测试 `chapterOneGuidanceDoesNotHandOutTheAnswer` 守卫这条约定。
 
 ## 架构
